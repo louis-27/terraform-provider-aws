@@ -47,13 +47,14 @@ which take the following arguments:
 * `values` - (Required) Set of values that are accepted for the given field.
   A VPC Endpoint will be selected if any one of the given values matches.
 
-## Attributes Reference
+## Attribute Reference
 
 In addition to all arguments above except `filter`, the following attributes are exported:
 
 * `arn` - ARN of the VPC endpoint.
 * `cidr_blocks` - List of CIDR blocks for the exposed AWS service. Applicable for endpoints of type `Gateway`.
-* `dns_entry` - DNS entries for the VPC Endpoint. Applicable for endpoints of type `Interface`. DNS blocks are documented below.
+* `dns_entry` - DNS entries for the VPC Endpoint. Applicable for endpoints of type `Interface`. [DNS entry blocks are documented below](#dns_entry-block).
+* `dns_options` - DNS options for the VPC Endpoint. [DNS options blocks are documented below](#dns_options-block).
 * `network_interface_ids` - One or more network interfaces for the VPC Endpoint. Applicable for endpoints of type `Interface`.
 * `owner_id` - ID of the AWS account that owns the VPC endpoint.
 * `policy` - Policy document associated with the VPC Endpoint. Applicable for endpoints of type `Gateway`.
@@ -62,13 +63,23 @@ In addition to all arguments above except `filter`, the following attributes are
 * `requester_managed` -  Whether or not the VPC Endpoint is being managed by its service - `true` or `false`.
 * `route_table_ids` - One or more route tables associated with the VPC Endpoint. Applicable for endpoints of type `Gateway`.
 * `security_group_ids` - One or more security groups associated with the network interfaces. Applicable for endpoints of type `Interface`.
+* `service_region` - The AWS region of the VPC Endpoint Service. Applicable for endpoints of type `Interface`.
 * `subnet_ids` - One or more subnets in which the VPC Endpoint is located. Applicable for endpoints of type `Interface`.
 * `vpc_endpoint_type` - VPC Endpoint type, `Gateway` or `Interface`.
+
+### `dns_entry` Block
 
 DNS blocks (for `dns_entry`) support the following attributes:
 
 * `dns_name` - DNS name.
 * `hosted_zone_id` - ID of the private hosted zone.
+
+### `dns_options` Block
+
+DNS options (for `dns_options`) support the following attributes:
+
+* `dns_record_ip_type` - The DNS records created for the endpoint.
+* `private_dns_only_for_inbound_resolver_endpoint` - Indicates whether to enable private DNS only for inbound endpoints.
 
 ## Timeouts
 

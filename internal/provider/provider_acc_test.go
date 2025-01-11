@@ -1,22 +1,29 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
 package provider_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
-	"strings"
 	"testing"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/endpoints"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	awsmiddleware "github.com/aws/aws-sdk-go-v2/aws/middleware"
+	"github.com/aws/aws-sdk-go-v2/service/sts"
+	"github.com/aws/smithy-go/middleware"
+	"github.com/hashicorp/aws-sdk-go-base/v2/endpoints"
 	"github.com/hashicorp/terraform-plugin-go/tfprotov5"
-	sdkacctest "github.com/hashicorp/terraform-plugin-sdk/v2/helper/acctest"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
+	sdkacctest "github.com/hashicorp/terraform-plugin-testing/helper/acctest"
+	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/terraform"
 	"github.com/hashicorp/terraform-provider-aws/internal/acctest"
 	"github.com/hashicorp/terraform-provider-aws/internal/conns"
 	"github.com/hashicorp/terraform-provider-aws/internal/provider"
+	tftags "github.com/hashicorp/terraform-provider-aws/internal/tags"
 	"github.com/hashicorp/terraform-provider-aws/names"
 )
 
@@ -27,13 +34,13 @@ func TestAccProvider_DefaultTags_emptyBlock(t *testing.T) {
 	resource.ParallelTest(t, resource.TestCase{
 		PreCheck:                 func() { acctest.PreCheck(ctx, t) },
 		ErrorCheck:               acctest.ErrorCheck(t),
-		ProtoV5ProviderFactories: testAccProtoV5ProviderFactoriesInternal(t, &provider),
+		ProtoV5ProviderFactories: testAccProtoV5ProviderFactoriesInternal(ctx, t, &provider),
 		CheckDestroy:             nil,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccProviderConfig_defaultTagsEmptyConfigurationBlock(),
 				Check: resource.ComposeTestCheckFunc(
-					testAccCheckProviderDefaultTags_Tags(t, &provider, map[string]string{}),
+					testAccCheckProviderDefaultTags_Tags(ctx, t, &provider, map[string]string{}),
 				),
 			},
 		},
@@ -47,13 +54,13 @@ func TestAccProvider_DefaultTagsTags_none(t *testing.T) {
 	resource.ParallelTest(t, resource.TestCase{
 		PreCheck:                 func() { acctest.PreCheck(ctx, t) },
 		ErrorCheck:               acctest.ErrorCheck(t),
-		ProtoV5ProviderFactories: testAccProtoV5ProviderFactoriesInternal(t, &provider),
+		ProtoV5ProviderFactories: testAccProtoV5ProviderFactoriesInternal(ctx, t, &provider),
 		CheckDestroy:             nil,
 		Steps: []resource.TestStep{
 			{ // nosemgrep:ci.test-config-funcs-correct-form
 				Config: acctest.ConfigDefaultTags_Tags0(),
 				Check: resource.ComposeTestCheckFunc(
-					testAccCheckProviderDefaultTags_Tags(t, &provider, map[string]string{}),
+					testAccCheckProviderDefaultTags_Tags(ctx, t, &provider, map[string]string{}),
 				),
 			},
 		},
@@ -67,13 +74,13 @@ func TestAccProvider_DefaultTagsTags_one(t *testing.T) {
 	resource.ParallelTest(t, resource.TestCase{
 		PreCheck:                 func() { acctest.PreCheck(ctx, t) },
 		ErrorCheck:               acctest.ErrorCheck(t),
-		ProtoV5ProviderFactories: testAccProtoV5ProviderFactoriesInternal(t, &provider),
+		ProtoV5ProviderFactories: testAccProtoV5ProviderFactoriesInternal(ctx, t, &provider),
 		CheckDestroy:             nil,
 		Steps: []resource.TestStep{
 			{ // nosemgrep:ci.test-config-funcs-correct-form
 				Config: acctest.ConfigDefaultTags_Tags1("test", "value"),
 				Check: resource.ComposeTestCheckFunc(
-					testAccCheckProviderDefaultTags_Tags(t, &provider, map[string]string{"test": "value"}),
+					testAccCheckProviderDefaultTags_Tags(ctx, t, &provider, map[string]string{"test": "value"}),
 				),
 			},
 		},
@@ -87,15 +94,41 @@ func TestAccProvider_DefaultTagsTags_multiple(t *testing.T) {
 	resource.ParallelTest(t, resource.TestCase{
 		PreCheck:                 func() { acctest.PreCheck(ctx, t) },
 		ErrorCheck:               acctest.ErrorCheck(t),
-		ProtoV5ProviderFactories: testAccProtoV5ProviderFactoriesInternal(t, &provider),
+		ProtoV5ProviderFactories: testAccProtoV5ProviderFactoriesInternal(ctx, t, &provider),
 		CheckDestroy:             nil,
 		Steps: []resource.TestStep{
 			{ // nosemgrep:ci.test-config-funcs-correct-form
 				Config: acctest.ConfigDefaultTags_Tags2("test1", "value1", "test2", "value2"),
 				Check: resource.ComposeTestCheckFunc(
-					testAccCheckProviderDefaultTags_Tags(t, &provider, map[string]string{
+					testAccCheckProviderDefaultTags_Tags(ctx, t, &provider, map[string]string{
 						"test1": "value1",
 						"test2": "value2",
+					}),
+				),
+			},
+		},
+	})
+}
+
+func TestAccProvider_DefaultTagsTags_envVars(t *testing.T) {
+	ctx := acctest.Context(t)
+	var p *schema.Provider
+
+	t.Setenv(tftags.DefaultTagsEnvVarPrefix+"test1", "envValue1")
+	t.Setenv(tftags.DefaultTagsEnvVarPrefix+"test2", "envValue2")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { acctest.PreCheck(ctx, t) },
+		ErrorCheck:               acctest.ErrorCheck(t),
+		ProtoV5ProviderFactories: testAccProtoV5ProviderFactoriesInternal(ctx, t, &p),
+		CheckDestroy:             nil,
+		Steps: []resource.TestStep{
+			{ // nosemgrep:ci.test-config-funcs-correct-form
+				Config: acctest.ConfigDefaultTags_Tags1("test1", "value1"),
+				Check: resource.ComposeTestCheckFunc(
+					testAccCheckProviderDefaultTags_Tags(ctx, t, &p, map[string]string{
+						"test1": "value1",
+						"test2": "envValue2",
 					}),
 				),
 			},
@@ -110,48 +143,22 @@ func TestAccProvider_DefaultAndIgnoreTags_emptyBlocks(t *testing.T) {
 	resource.ParallelTest(t, resource.TestCase{
 		PreCheck:                 func() { acctest.PreCheck(ctx, t) },
 		ErrorCheck:               acctest.ErrorCheck(t),
-		ProtoV5ProviderFactories: testAccProtoV5ProviderFactoriesInternal(t, &provider),
+		ProtoV5ProviderFactories: testAccProtoV5ProviderFactoriesInternal(ctx, t, &provider),
 		CheckDestroy:             nil,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccProviderConfig_defaultAndIgnoreTagsEmptyConfigurationBlock(),
 				Check: resource.ComposeTestCheckFunc(
-					testAccCheckProviderDefaultTags_Tags(t, &provider, map[string]string{}),
-					testAccCheckIgnoreTagsKeys(t, &provider, []string{}),
-					testAccCheckIgnoreTagsKeyPrefixes(t, &provider, []string{}),
+					testAccCheckProviderDefaultTags_Tags(ctx, t, &provider, map[string]string{}),
+					testAccCheckIgnoreTagsKeys(ctx, t, &provider, []string{}),
+					testAccCheckIgnoreTagsKeyPrefixes(ctx, t, &provider, []string{}),
 				),
 			},
 		},
 	})
 }
 
-func TestAccProvider_endpoints(t *testing.T) {
-	ctx := acctest.Context(t)
-	var provider *schema.Provider
-	var endpoints strings.Builder
-
-	// Initialize each endpoint configuration with matching name and value
-	for _, serviceKey := range names.ProviderPackages() {
-		endpoints.WriteString(fmt.Sprintf("%s = \"http://%s\"\n", serviceKey, serviceKey))
-	}
-
-	resource.ParallelTest(t, resource.TestCase{
-		PreCheck:                 func() { acctest.PreCheck(ctx, t) },
-		ErrorCheck:               acctest.ErrorCheck(t),
-		ProtoV5ProviderFactories: testAccProtoV5ProviderFactoriesInternal(t, &provider),
-		CheckDestroy:             nil,
-		Steps: []resource.TestStep{
-			{
-				Config: testAccProviderConfig_endpoints(endpoints.String()),
-				Check: resource.ComposeTestCheckFunc(
-					testAccCheckEndpoints(&provider),
-				),
-			},
-		},
-	})
-}
-
-func TestAccProvider_fipsEndpoint(t *testing.T) {
+func TestAccProvider_customEndpoint(t *testing.T) {
 	ctx := acctest.Context(t)
 	rName := sdkacctest.RandomWithPrefix(acctest.ResourcePrefix)
 	resourceName := "aws_s3_bucket.test"
@@ -163,7 +170,8 @@ func TestAccProvider_fipsEndpoint(t *testing.T) {
 		CheckDestroy:             nil,
 		Steps: []resource.TestStep{
 			{
-				Config: testAccProviderConfig_fipsEndpoint(fmt.Sprintf("https://s3-fips.%s.%s", acctest.Region(), acctest.PartitionDNSSuffix()), rName),
+				// The fips endpoint is used here just because it's a valid endpoint that isn't the normal endpoint.
+				Config: testAccProviderConfig_customS3Endpoint(fmt.Sprintf("https://s3-fips.%s.%s", acctest.Region(), acctest.PartitionDNSSuffix()), rName),
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttr(resourceName, "bucket", rName),
 				),
@@ -182,21 +190,61 @@ func TestAccProvider_unusualEndpoints(t *testing.T) {
 	ctx := acctest.Context(t)
 	var provider *schema.Provider
 	unusual1 := unusualEndpoint{"es", "elasticsearch", "http://notarealendpoint"}
-	unusual2 := unusualEndpoint{"databasemigration", "dms", "http://alsonotarealendpoint"}
-	unusual3 := unusualEndpoint{"lexmodelbuildingservice", "lexmodels", "http://kingofspain"}
+	unusual2 := unusualEndpoint{"lexmodelbuildingservice", "lexmodels", "http://kingofspain"}
 
 	resource.ParallelTest(t, resource.TestCase{
 		PreCheck:                 func() { acctest.PreCheck(ctx, t) },
 		ErrorCheck:               acctest.ErrorCheck(t),
-		ProtoV5ProviderFactories: testAccProtoV5ProviderFactoriesInternal(t, &provider),
+		ProtoV5ProviderFactories: testAccProtoV5ProviderFactoriesInternal(ctx, t, &provider),
 		CheckDestroy:             nil,
 		Steps: []resource.TestStep{
 			{
-				Config: testAccProviderConfig_unusualEndpoints(unusual1, unusual2, unusual3),
+				Config: testAccProviderConfig_unusualEndpoints(unusual1, unusual2),
 				Check: resource.ComposeTestCheckFunc(
-					testAccCheckUnusualEndpoints(&provider, unusual1),
-					testAccCheckUnusualEndpoints(&provider, unusual2),
-					testAccCheckUnusualEndpoints(&provider, unusual3),
+					testAccCheckUnusualEndpoints(ctx, &provider, unusual1),
+					testAccCheckUnusualEndpoints(ctx, &provider, unusual2),
+				),
+			},
+		},
+	})
+}
+
+func TestAccProvider_useFipsEndpointFlag(t *testing.T) {
+	ctx := acctest.Context(t)
+	rName := sdkacctest.RandomWithPrefix(acctest.ResourcePrefix)
+	resourceName := "aws_s3_bucket.test"
+
+	resource.ParallelTest(t, resource.TestCase{
+		PreCheck:                 func() { acctest.PreCheck(ctx, t) },
+		ErrorCheck:               acctest.ErrorCheck(t),
+		ProtoV5ProviderFactories: acctest.ProtoV5ProviderFactories,
+		CheckDestroy:             nil,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccProviderConfig_useFipsEndpointFlag(rName),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr(resourceName, "bucket", rName),
+				),
+			},
+		},
+	})
+}
+
+func TestAccProvider_overrideUseFipsEndpointFlagForOneService(t *testing.T) {
+	ctx := acctest.Context(t)
+	rName := sdkacctest.RandomWithPrefix(acctest.ResourcePrefix)
+	resourceName := "aws_appconfig_application.test"
+
+	resource.ParallelTest(t, resource.TestCase{
+		PreCheck:                 func() { acctest.PreCheck(ctx, t) },
+		ErrorCheck:               acctest.ErrorCheck(t),
+		ProtoV5ProviderFactories: acctest.ProtoV5ProviderFactories,
+		CheckDestroy:             nil,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccProviderConfig_overridesUseFipsEndpointFlagForAppConfig(rName),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr(resourceName, "name", rName),
 				),
 			},
 		},
@@ -210,14 +258,14 @@ func TestAccProvider_IgnoreTags_emptyBlock(t *testing.T) {
 	resource.ParallelTest(t, resource.TestCase{
 		PreCheck:                 func() { acctest.PreCheck(ctx, t) },
 		ErrorCheck:               acctest.ErrorCheck(t),
-		ProtoV5ProviderFactories: testAccProtoV5ProviderFactoriesInternal(t, &provider),
+		ProtoV5ProviderFactories: testAccProtoV5ProviderFactoriesInternal(ctx, t, &provider),
 		CheckDestroy:             nil,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccProviderConfig_ignoreTagsEmptyConfigurationBlock(),
 				Check: resource.ComposeTestCheckFunc(
-					testAccCheckIgnoreTagsKeys(t, &provider, []string{}),
-					testAccCheckIgnoreTagsKeyPrefixes(t, &provider, []string{}),
+					testAccCheckIgnoreTagsKeys(ctx, t, &provider, []string{}),
+					testAccCheckIgnoreTagsKeyPrefixes(ctx, t, &provider, []string{}),
 				),
 			},
 		},
@@ -231,13 +279,13 @@ func TestAccProvider_IgnoreTagsKeyPrefixes_none(t *testing.T) {
 	resource.ParallelTest(t, resource.TestCase{
 		PreCheck:                 func() { acctest.PreCheck(ctx, t) },
 		ErrorCheck:               acctest.ErrorCheck(t),
-		ProtoV5ProviderFactories: testAccProtoV5ProviderFactoriesInternal(t, &provider),
+		ProtoV5ProviderFactories: testAccProtoV5ProviderFactoriesInternal(ctx, t, &provider),
 		CheckDestroy:             nil,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccProviderConfig_ignoreTagsKeyPrefixes0(),
 				Check: resource.ComposeTestCheckFunc(
-					testAccCheckIgnoreTagsKeyPrefixes(t, &provider, []string{}),
+					testAccCheckIgnoreTagsKeyPrefixes(ctx, t, &provider, []string{}),
 				),
 			},
 		},
@@ -251,13 +299,13 @@ func TestAccProvider_IgnoreTagsKeyPrefixes_one(t *testing.T) {
 	resource.ParallelTest(t, resource.TestCase{
 		PreCheck:                 func() { acctest.PreCheck(ctx, t) },
 		ErrorCheck:               acctest.ErrorCheck(t),
-		ProtoV5ProviderFactories: testAccProtoV5ProviderFactoriesInternal(t, &provider),
+		ProtoV5ProviderFactories: testAccProtoV5ProviderFactoriesInternal(ctx, t, &provider),
 		CheckDestroy:             nil,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccProviderConfig_ignoreTagsKeyPrefixes3("test"),
 				Check: resource.ComposeTestCheckFunc(
-					testAccCheckIgnoreTagsKeyPrefixes(t, &provider, []string{"test"}),
+					testAccCheckIgnoreTagsKeyPrefixes(ctx, t, &provider, []string{"test"}),
 				),
 			},
 		},
@@ -271,13 +319,13 @@ func TestAccProvider_IgnoreTagsKeyPrefixes_multiple(t *testing.T) {
 	resource.ParallelTest(t, resource.TestCase{
 		PreCheck:                 func() { acctest.PreCheck(ctx, t) },
 		ErrorCheck:               acctest.ErrorCheck(t),
-		ProtoV5ProviderFactories: testAccProtoV5ProviderFactoriesInternal(t, &provider),
+		ProtoV5ProviderFactories: testAccProtoV5ProviderFactoriesInternal(ctx, t, &provider),
 		CheckDestroy:             nil,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccProviderConfig_ignoreTagsKeyPrefixes2("test1", "test2"),
 				Check: resource.ComposeTestCheckFunc(
-					testAccCheckIgnoreTagsKeyPrefixes(t, &provider, []string{"test1", "test2"}),
+					testAccCheckIgnoreTagsKeyPrefixes(ctx, t, &provider, []string{"test1", "test2"}),
 				),
 			},
 		},
@@ -291,13 +339,13 @@ func TestAccProvider_IgnoreTagsKeys_none(t *testing.T) {
 	resource.ParallelTest(t, resource.TestCase{
 		PreCheck:                 func() { acctest.PreCheck(ctx, t) },
 		ErrorCheck:               acctest.ErrorCheck(t),
-		ProtoV5ProviderFactories: testAccProtoV5ProviderFactoriesInternal(t, &provider),
+		ProtoV5ProviderFactories: testAccProtoV5ProviderFactoriesInternal(ctx, t, &provider),
 		CheckDestroy:             nil,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccProviderConfig_ignoreTagsKeys0(),
 				Check: resource.ComposeTestCheckFunc(
-					testAccCheckIgnoreTagsKeys(t, &provider, []string{}),
+					testAccCheckIgnoreTagsKeys(ctx, t, &provider, []string{}),
 				),
 			},
 		},
@@ -311,13 +359,13 @@ func TestAccProvider_IgnoreTagsKeys_one(t *testing.T) {
 	resource.ParallelTest(t, resource.TestCase{
 		PreCheck:                 func() { acctest.PreCheck(ctx, t) },
 		ErrorCheck:               acctest.ErrorCheck(t),
-		ProtoV5ProviderFactories: testAccProtoV5ProviderFactoriesInternal(t, &provider),
+		ProtoV5ProviderFactories: testAccProtoV5ProviderFactoriesInternal(ctx, t, &provider),
 		CheckDestroy:             nil,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccProviderConfig_ignoreTagsKeys1("test"),
 				Check: resource.ComposeTestCheckFunc(
-					testAccCheckIgnoreTagsKeys(t, &provider, []string{"test"}),
+					testAccCheckIgnoreTagsKeys(ctx, t, &provider, []string{"test"}),
 				),
 			},
 		},
@@ -331,13 +379,101 @@ func TestAccProvider_IgnoreTagsKeys_multiple(t *testing.T) {
 	resource.ParallelTest(t, resource.TestCase{
 		PreCheck:                 func() { acctest.PreCheck(ctx, t) },
 		ErrorCheck:               acctest.ErrorCheck(t),
-		ProtoV5ProviderFactories: testAccProtoV5ProviderFactoriesInternal(t, &provider),
+		ProtoV5ProviderFactories: testAccProtoV5ProviderFactoriesInternal(ctx, t, &provider),
 		CheckDestroy:             nil,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccProviderConfig_ignoreTagsKeys2("test1", "test2"),
 				Check: resource.ComposeTestCheckFunc(
-					testAccCheckIgnoreTagsKeys(t, &provider, []string{"test1", "test2"}),
+					testAccCheckIgnoreTagsKeys(ctx, t, &provider, []string{"test1", "test2"}),
+				),
+			},
+		},
+	})
+}
+
+func TestAccProvider_IgnoreTagsKeys_envVarOnly(t *testing.T) {
+	ctx := acctest.Context(t)
+	var provider *schema.Provider
+
+	t.Setenv(tftags.IgnoreTagsKeysEnvVar, "test3,test4")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { acctest.PreCheck(ctx, t) },
+		ErrorCheck:               acctest.ErrorCheck(t),
+		ProtoV5ProviderFactories: testAccProtoV5ProviderFactoriesInternal(ctx, t, &provider),
+		CheckDestroy:             nil,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccProviderConfig_ignoreTagsKeys0(),
+				Check: resource.ComposeTestCheckFunc(
+					testAccCheckIgnoreTagsKeys(ctx, t, &provider, []string{"test3", "test4"}),
+				),
+			},
+		},
+	})
+}
+
+func TestAccProvider_IgnoreTagsKeys_envVarMerged(t *testing.T) {
+	ctx := acctest.Context(t)
+	var provider *schema.Provider
+
+	t.Setenv(tftags.IgnoreTagsKeysEnvVar, "test3,test4")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { acctest.PreCheck(ctx, t) },
+		ErrorCheck:               acctest.ErrorCheck(t),
+		ProtoV5ProviderFactories: testAccProtoV5ProviderFactoriesInternal(ctx, t, &provider),
+		CheckDestroy:             nil,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccProviderConfig_ignoreTagsKeys2("test1", "test2"),
+				Check: resource.ComposeTestCheckFunc(
+					testAccCheckIgnoreTagsKeys(ctx, t, &provider, []string{"test1", "test2", "test3", "test4"}),
+				),
+			},
+		},
+	})
+}
+
+func TestAccProvider_IgnoreTagsKeyPrefixes_envVarOnly(t *testing.T) {
+	ctx := acctest.Context(t)
+	var provider *schema.Provider
+
+	t.Setenv(tftags.IgnoreTagsKeyPrefixesEnvVar, "test3,test4")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { acctest.PreCheck(ctx, t) },
+		ErrorCheck:               acctest.ErrorCheck(t),
+		ProtoV5ProviderFactories: testAccProtoV5ProviderFactoriesInternal(ctx, t, &provider),
+		CheckDestroy:             nil,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccProviderConfig_ignoreTagsKeyPrefixes0(),
+				Check: resource.ComposeTestCheckFunc(
+					testAccCheckIgnoreTagsKeyPrefixes(ctx, t, &provider, []string{"test3", "test4"}),
+				),
+			},
+		},
+	})
+}
+
+func TestAccProvider_IgnoreTagsKeyPrefixes_envVarMerged(t *testing.T) {
+	ctx := acctest.Context(t)
+	var provider *schema.Provider
+
+	t.Setenv(tftags.IgnoreTagsKeyPrefixesEnvVar, "test3,test4")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { acctest.PreCheck(ctx, t) },
+		ErrorCheck:               acctest.ErrorCheck(t),
+		ProtoV5ProviderFactories: testAccProtoV5ProviderFactoriesInternal(ctx, t, &provider),
+		CheckDestroy:             nil,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccProviderConfig_ignoreTagsKeyPrefixes2("test1", "test2"),
+				Check: resource.ComposeTestCheckFunc(
+					testAccCheckIgnoreTagsKeyPrefixes(ctx, t, &provider, []string{"test1", "test2", "test3", "test4"}),
 				),
 			},
 		},
@@ -345,21 +481,24 @@ func TestAccProvider_IgnoreTagsKeys_multiple(t *testing.T) {
 }
 
 func TestAccProvider_Region_c2s(t *testing.T) {
+	// When using `AWS_PROFILE` for authentication, `skip_credentials_validation` is ignored
+	// https://github.com/hashicorp/aws-sdk-go-base/issues/453
+	t.Skip()
 	ctx := acctest.Context(t)
 	var provider *schema.Provider
 
 	resource.ParallelTest(t, resource.TestCase{
 		PreCheck:                 func() { acctest.PreCheck(ctx, t) },
 		ErrorCheck:               acctest.ErrorCheck(t),
-		ProtoV5ProviderFactories: testAccProtoV5ProviderFactoriesInternal(t, &provider),
+		ProtoV5ProviderFactories: testAccProtoV5ProviderFactoriesInternal(ctx, t, &provider),
 		CheckDestroy:             nil,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccProviderConfig_region(endpoints.UsIsoEast1RegionID),
 				Check: resource.ComposeTestCheckFunc(
-					testAccCheckDNSSuffix(t, &provider, "c2s.ic.gov"),
-					testAccCheckPartition(t, &provider, endpoints.AwsIsoPartitionID),
-					testAccCheckReverseDNSPrefix(t, &provider, "gov.ic.c2s"),
+					testAccCheckDNSSuffix(ctx, t, &provider, "c2s.ic.gov"),
+					testAccCheckPartition(ctx, t, &provider, endpoints.AwsIsoPartitionID),
+					testAccCheckReverseDNSPrefix(ctx, t, &provider, "gov.ic.c2s"),
 				),
 				PlanOnly: true,
 			},
@@ -368,21 +507,24 @@ func TestAccProvider_Region_c2s(t *testing.T) {
 }
 
 func TestAccProvider_Region_china(t *testing.T) {
+	// When using `AWS_PROFILE` for authentication, `skip_credentials_validation` is ignored
+	// https://github.com/hashicorp/aws-sdk-go-base/issues/453
+	t.Skip()
 	ctx := acctest.Context(t)
 	var provider *schema.Provider
 
 	resource.ParallelTest(t, resource.TestCase{
 		PreCheck:                 func() { acctest.PreCheck(ctx, t) },
 		ErrorCheck:               acctest.ErrorCheck(t),
-		ProtoV5ProviderFactories: testAccProtoV5ProviderFactoriesInternal(t, &provider),
+		ProtoV5ProviderFactories: testAccProtoV5ProviderFactoriesInternal(ctx, t, &provider),
 		CheckDestroy:             nil,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccProviderConfig_region(endpoints.CnNorthwest1RegionID),
 				Check: resource.ComposeTestCheckFunc(
-					testAccCheckDNSSuffix(t, &provider, "amazonaws.com.cn"),
-					testAccCheckPartition(t, &provider, endpoints.AwsCnPartitionID),
-					testAccCheckReverseDNSPrefix(t, &provider, "cn.com.amazonaws"),
+					testAccCheckDNSSuffix(ctx, t, &provider, "amazonaws.com.cn"),
+					testAccCheckPartition(ctx, t, &provider, endpoints.AwsCnPartitionID),
+					testAccCheckReverseDNSPrefix(ctx, t, &provider, "cn.com.amazonaws"),
 				),
 				PlanOnly: true,
 			},
@@ -391,21 +533,24 @@ func TestAccProvider_Region_china(t *testing.T) {
 }
 
 func TestAccProvider_Region_commercial(t *testing.T) {
+	// When using `AWS_PROFILE` for authentication, `skip_credentials_validation` is ignored
+	// https://github.com/hashicorp/aws-sdk-go-base/issues/453
+	t.Skip()
 	ctx := acctest.Context(t)
 	var provider *schema.Provider
 
 	resource.ParallelTest(t, resource.TestCase{
 		PreCheck:                 func() { acctest.PreCheck(ctx, t) },
 		ErrorCheck:               acctest.ErrorCheck(t),
-		ProtoV5ProviderFactories: testAccProtoV5ProviderFactoriesInternal(t, &provider),
+		ProtoV5ProviderFactories: testAccProtoV5ProviderFactoriesInternal(ctx, t, &provider),
 		CheckDestroy:             nil,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccProviderConfig_region(endpoints.UsWest2RegionID),
 				Check: resource.ComposeTestCheckFunc(
-					testAccCheckDNSSuffix(t, &provider, "amazonaws.com"),
-					testAccCheckPartition(t, &provider, endpoints.AwsPartitionID),
-					testAccCheckReverseDNSPrefix(t, &provider, "com.amazonaws"),
+					testAccCheckDNSSuffix(ctx, t, &provider, "amazonaws.com"),
+					testAccCheckPartition(ctx, t, &provider, endpoints.AwsPartitionID),
+					testAccCheckReverseDNSPrefix(ctx, t, &provider, "com.amazonaws"),
 				),
 				PlanOnly: true,
 			},
@@ -414,21 +559,24 @@ func TestAccProvider_Region_commercial(t *testing.T) {
 }
 
 func TestAccProvider_Region_govCloud(t *testing.T) {
+	// When using `AWS_PROFILE` for authentication, `skip_credentials_validation` is ignored
+	// https://github.com/hashicorp/aws-sdk-go-base/issues/453
+	t.Skip()
 	ctx := acctest.Context(t)
 	var provider *schema.Provider
 
 	resource.ParallelTest(t, resource.TestCase{
 		PreCheck:                 func() { acctest.PreCheck(ctx, t) },
 		ErrorCheck:               acctest.ErrorCheck(t),
-		ProtoV5ProviderFactories: testAccProtoV5ProviderFactoriesInternal(t, &provider),
+		ProtoV5ProviderFactories: testAccProtoV5ProviderFactoriesInternal(ctx, t, &provider),
 		CheckDestroy:             nil,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccProviderConfig_region(endpoints.UsGovWest1RegionID),
 				Check: resource.ComposeTestCheckFunc(
-					testAccCheckDNSSuffix(t, &provider, "amazonaws.com"),
-					testAccCheckPartition(t, &provider, endpoints.AwsUsGovPartitionID),
-					testAccCheckReverseDNSPrefix(t, &provider, "com.amazonaws"),
+					testAccCheckDNSSuffix(ctx, t, &provider, "amazonaws.com"),
+					testAccCheckPartition(ctx, t, &provider, endpoints.AwsUsGovPartitionID),
+					testAccCheckReverseDNSPrefix(ctx, t, &provider, "com.amazonaws"),
 				),
 				PlanOnly: true,
 			},
@@ -437,21 +585,24 @@ func TestAccProvider_Region_govCloud(t *testing.T) {
 }
 
 func TestAccProvider_Region_sc2s(t *testing.T) {
+	// When using `AWS_PROFILE` for authentication, `skip_credentials_validation` is ignored
+	// https://github.com/hashicorp/aws-sdk-go-base/issues/453
+	t.Skip()
 	ctx := acctest.Context(t)
 	var provider *schema.Provider
 
 	resource.ParallelTest(t, resource.TestCase{
 		PreCheck:                 func() { acctest.PreCheck(ctx, t) },
 		ErrorCheck:               acctest.ErrorCheck(t),
-		ProtoV5ProviderFactories: testAccProtoV5ProviderFactoriesInternal(t, &provider),
+		ProtoV5ProviderFactories: testAccProtoV5ProviderFactoriesInternal(ctx, t, &provider),
 		CheckDestroy:             nil,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccProviderConfig_region(endpoints.UsIsobEast1RegionID),
 				Check: resource.ComposeTestCheckFunc(
-					testAccCheckDNSSuffix(t, &provider, "sc2s.sgov.gov"),
-					testAccCheckPartition(t, &provider, endpoints.AwsIsoBPartitionID),
-					testAccCheckReverseDNSPrefix(t, &provider, "gov.sgov.sc2s"),
+					testAccCheckDNSSuffix(ctx, t, &provider, "sc2s.sgov.gov"),
+					testAccCheckPartition(ctx, t, &provider, endpoints.AwsIsoBPartitionID),
+					testAccCheckReverseDNSPrefix(ctx, t, &provider, "gov.sgov.sc2s"),
 				),
 				PlanOnly: true,
 			},
@@ -460,20 +611,23 @@ func TestAccProvider_Region_sc2s(t *testing.T) {
 }
 
 func TestAccProvider_Region_stsRegion(t *testing.T) {
+	// When using `AWS_PROFILE` for authentication, `skip_credentials_validation` is ignored
+	// https://github.com/hashicorp/aws-sdk-go-base/issues/453
+	t.Skip()
 	ctx := acctest.Context(t)
 	var provider *schema.Provider
 
 	resource.ParallelTest(t, resource.TestCase{
 		PreCheck:                 func() { acctest.PreCheck(ctx, t) },
 		ErrorCheck:               acctest.ErrorCheck(t),
-		ProtoV5ProviderFactories: testAccProtoV5ProviderFactoriesInternal(t, &provider),
+		ProtoV5ProviderFactories: testAccProtoV5ProviderFactoriesInternal(ctx, t, &provider),
 		CheckDestroy:             nil,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccProviderConfig_stsRegion(endpoints.UsEast1RegionID, endpoints.UsWest2RegionID),
 				Check: resource.ComposeTestCheckFunc(
-					testAccCheckRegion(t, &provider, endpoints.UsEast1RegionID),
-					testAccCheckSTSRegion(t, &provider, endpoints.UsWest2RegionID),
+					testAccCheckRegion(ctx, t, &provider, endpoints.UsEast1RegionID),
+					testAccCheckSTSRegion(ctx, t, &provider, endpoints.UsWest2RegionID),
 				),
 				PlanOnly: true,
 			},
@@ -481,8 +635,10 @@ func TestAccProvider_Region_stsRegion(t *testing.T) {
 	})
 }
 
+// For historical reasons, ignore a single empty `assume_role` block
 func TestAccProvider_AssumeRole_empty(t *testing.T) {
 	ctx := acctest.Context(t)
+
 	resource.ParallelTest(t, resource.TestCase{
 		PreCheck:                 func() { acctest.PreCheck(ctx, t) },
 		ErrorCheck:               acctest.ErrorCheck(t),
@@ -492,15 +648,15 @@ func TestAccProvider_AssumeRole_empty(t *testing.T) {
 			{
 				Config: testAccProviderConfig_assumeRoleEmpty,
 				Check: resource.ComposeTestCheckFunc(
-					acctest.CheckCallerIdentityAccountID("data.aws_caller_identity.current"),
+					acctest.CheckCallerIdentityAccountID(ctx, "data.aws_caller_identity.current"),
 				),
 			},
 		},
 	})
 }
 
-func testAccProtoV5ProviderFactoriesInternal(t *testing.T, v **schema.Provider) map[string]func() (tfprotov5.ProviderServer, error) {
-	providerServerFactory, p, err := provider.ProtoV5ProviderServerFactory(context.Background())
+func testAccProtoV5ProviderFactoriesInternal(ctx context.Context, t *testing.T, v **schema.Provider) map[string]func() (tfprotov5.ProviderServer, error) {
+	providerServerFactory, p, err := provider.ProtoV5ProviderServerFactory(ctx)
 
 	if err != nil {
 		t.Fatal(err)
@@ -516,13 +672,13 @@ func testAccProtoV5ProviderFactoriesInternal(t *testing.T, v **schema.Provider) 
 	}
 }
 
-func testAccCheckPartition(t *testing.T, p **schema.Provider, expectedPartition string) resource.TestCheckFunc { //nolint:unparam
+func testAccCheckPartition(ctx context.Context, t *testing.T, p **schema.Provider, expectedPartition string) resource.TestCheckFunc { //nolint:unparam
 	return func(s *terraform.State) error {
 		if p == nil || *p == nil || (*p).Meta() == nil || (*p).Meta().(*conns.AWSClient) == nil {
 			return fmt.Errorf("provider not initialized")
 		}
 
-		providerPartition := (*p).Meta().(*conns.AWSClient).Partition
+		providerPartition := (*p).Meta().(*conns.AWSClient).Partition(ctx)
 
 		if providerPartition != expectedPartition {
 			return fmt.Errorf("expected DNS Suffix (%s), got: %s", expectedPartition, providerPartition)
@@ -532,13 +688,13 @@ func testAccCheckPartition(t *testing.T, p **schema.Provider, expectedPartition 
 	}
 }
 
-func testAccCheckDNSSuffix(t *testing.T, p **schema.Provider, expectedDnsSuffix string) resource.TestCheckFunc { //nolint:unparam
+func testAccCheckDNSSuffix(ctx context.Context, t *testing.T, p **schema.Provider, expectedDnsSuffix string) resource.TestCheckFunc { //nolint:unparam
 	return func(s *terraform.State) error {
 		if p == nil || *p == nil || (*p).Meta() == nil || (*p).Meta().(*conns.AWSClient) == nil {
 			return fmt.Errorf("provider not initialized")
 		}
 
-		providerDnsSuffix := (*p).Meta().(*conns.AWSClient).DNSSuffix
+		providerDnsSuffix := (*p).Meta().(*conns.AWSClient).DNSSuffix(ctx)
 
 		if providerDnsSuffix != expectedDnsSuffix {
 			return fmt.Errorf("expected DNS Suffix (%s), got: %s", expectedDnsSuffix, providerDnsSuffix)
@@ -548,13 +704,13 @@ func testAccCheckDNSSuffix(t *testing.T, p **schema.Provider, expectedDnsSuffix 
 	}
 }
 
-func testAccCheckRegion(t *testing.T, p **schema.Provider, expectedRegion string) resource.TestCheckFunc { //nolint:unparam
+func testAccCheckRegion(ctx context.Context, t *testing.T, p **schema.Provider, expectedRegion string) resource.TestCheckFunc { //nolint:unparam
 	return func(s *terraform.State) error {
 		if p == nil || *p == nil || (*p).Meta() == nil || (*p).Meta().(*conns.AWSClient) == nil {
 			return fmt.Errorf("provider not initialized")
 		}
 
-		if got := (*p).Meta().(*conns.AWSClient).Region; got != expectedRegion {
+		if got := (*p).Meta().(*conns.AWSClient).Region(ctx); got != expectedRegion {
 			return fmt.Errorf("expected Region (%s), got: %s", expectedRegion, got)
 		}
 
@@ -562,13 +718,29 @@ func testAccCheckRegion(t *testing.T, p **schema.Provider, expectedRegion string
 	}
 }
 
-func testAccCheckSTSRegion(t *testing.T, p **schema.Provider, expectedRegion string) resource.TestCheckFunc { //nolint:unparam
+func testAccCheckSTSRegion(ctx context.Context, t *testing.T, p **schema.Provider, expectedRegion string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		if p == nil || *p == nil || (*p).Meta() == nil || (*p).Meta().(*conns.AWSClient) == nil {
 			return fmt.Errorf("provider not initialized")
 		}
 
-		stsRegion := aws.StringValue((*p).Meta().(*conns.AWSClient).STSConn().Config.Region)
+		var stsRegion string
+
+		stsClient := (*p).Meta().(*conns.AWSClient).STSClient(ctx)
+		input := sts.GetCallerIdentityInput{}
+		_, err := stsClient.GetCallerIdentity(ctx, &input,
+			func(opts *sts.Options) {
+				opts.APIOptions = append(opts.APIOptions,
+					addRegionRetrieverMiddleware(&stsRegion),
+					addCancelRequestMiddleware(),
+				)
+			},
+		)
+		if err == nil {
+			t.Fatal("Expected an error, got none")
+		} else if !errors.Is(err, errCancelOperation) {
+			t.Fatalf("Unexpected error: %s", err)
+		}
 
 		if stsRegion != expectedRegion {
 			return fmt.Errorf("expected STS Region (%s), got: %s", expectedRegion, stsRegion)
@@ -578,12 +750,51 @@ func testAccCheckSTSRegion(t *testing.T, p **schema.Provider, expectedRegion str
 	}
 }
 
-func testAccCheckReverseDNSPrefix(t *testing.T, p **schema.Provider, expectedReverseDnsPrefix string) resource.TestCheckFunc { //nolint:unparam
+var errCancelOperation = fmt.Errorf("Test: Cancelling request")
+
+func addCancelRequestMiddleware() func(*middleware.Stack) error {
+	return func(stack *middleware.Stack) error {
+		return stack.Finalize.Add(
+			cancelRequestMiddleware(),
+			middleware.After,
+		)
+	}
+}
+
+func cancelRequestMiddleware() middleware.FinalizeMiddleware {
+	return middleware.FinalizeMiddlewareFunc(
+		"Test: Cancel Requests",
+		func(_ context.Context, in middleware.FinalizeInput, next middleware.FinalizeHandler) (middleware.FinalizeOutput, middleware.Metadata, error) {
+			return middleware.FinalizeOutput{}, middleware.Metadata{}, errCancelOperation
+		})
+}
+
+func addRegionRetrieverMiddleware(region *string) func(*middleware.Stack) error {
+	return func(stack *middleware.Stack) error {
+		return stack.Serialize.Add(
+			retrieveRegionMiddleware(region),
+			middleware.After,
+		)
+	}
+}
+
+func retrieveRegionMiddleware(region *string) middleware.SerializeMiddleware {
+	return middleware.SerializeMiddlewareFunc(
+		"Test: Retrieve Region",
+		func(ctx context.Context, in middleware.SerializeInput, next middleware.SerializeHandler) (middleware.SerializeOutput, middleware.Metadata, error) {
+			*region = awsmiddleware.GetRegion(ctx)
+
+			return next.HandleSerialize(ctx, in)
+		},
+	)
+}
+
+func testAccCheckReverseDNSPrefix(ctx context.Context, t *testing.T, p **schema.Provider, expectedReverseDnsPrefix string) resource.TestCheckFunc { //nolint:unparam
 	return func(s *terraform.State) error {
 		if p == nil || *p == nil || (*p).Meta() == nil || (*p).Meta().(*conns.AWSClient) == nil {
 			return fmt.Errorf("provider not initialized")
 		}
-		providerReverseDnsPrefix := (*p).Meta().(*conns.AWSClient).ReverseDNSPrefix
+		providerReverseDnsPrefix := (*p).Meta().(*conns.AWSClient).ReverseDNSPrefix(ctx)
 
 		if providerReverseDnsPrefix != expectedReverseDnsPrefix {
 			return fmt.Errorf("expected DNS Suffix (%s), got: %s", expectedReverseDnsPrefix, providerReverseDnsPrefix)
@@ -593,14 +804,14 @@ func testAccCheckReverseDNSPrefix(t *testing.T, p **schema.Provider, expectedRev
 	}
 }
 
-func testAccCheckIgnoreTagsKeyPrefixes(t *testing.T, p **schema.Provider, expectedKeyPrefixes []string) resource.TestCheckFunc { //nolint:unparam
+func testAccCheckIgnoreTagsKeyPrefixes(ctx context.Context, t *testing.T, p **schema.Provider, expectedKeyPrefixes []string) resource.TestCheckFunc { //nolint:unparam
 	return func(s *terraform.State) error {
 		if p == nil || *p == nil || (*p).Meta() == nil || (*p).Meta().(*conns.AWSClient) == nil {
 			return fmt.Errorf("provider not initialized")
 		}
 
 		providerClient := (*p).Meta().(*conns.AWSClient)
-		ignoreTagsConfig := providerClient.IgnoreTagsConfig
+		ignoreTagsConfig := providerClient.IgnoreTagsConfig(ctx)
 
 		if ignoreTagsConfig == nil || ignoreTagsConfig.KeyPrefixes == nil {
 			if len(expectedKeyPrefixes) != 0 {
@@ -650,14 +861,14 @@ func testAccCheckIgnoreTagsKeyPrefixes(t *testing.T, p **schema.Provider, expect
 	}
 }
 
-func testAccCheckIgnoreTagsKeys(t *testing.T, p **schema.Provider, expectedKeys []string) resource.TestCheckFunc { //nolint:unparam
+func testAccCheckIgnoreTagsKeys(ctx context.Context, t *testing.T, p **schema.Provider, expectedKeys []string) resource.TestCheckFunc { //nolint:unparam
 	return func(s *terraform.State) error {
 		if p == nil || *p == nil || (*p).Meta() == nil || (*p).Meta().(*conns.AWSClient) == nil {
 			return fmt.Errorf("provider not initialized")
 		}
 
 		providerClient := (*p).Meta().(*conns.AWSClient)
-		ignoreTagsConfig := providerClient.IgnoreTagsConfig
+		ignoreTagsConfig := providerClient.IgnoreTagsConfig(ctx)
 
 		if ignoreTagsConfig == nil || ignoreTagsConfig.Keys == nil {
 			if len(expectedKeys) != 0 {
@@ -707,14 +918,14 @@ func testAccCheckIgnoreTagsKeys(t *testing.T, p **schema.Provider, expectedKeys 
 	}
 }
 
-func testAccCheckProviderDefaultTags_Tags(t *testing.T, p **schema.Provider, expectedTags map[string]string) resource.TestCheckFunc { //nolint:unparam
+func testAccCheckProviderDefaultTags_Tags(ctx context.Context, t *testing.T, p **schema.Provider, expectedTags map[string]string) resource.TestCheckFunc { //nolint:unparam
 	return func(s *terraform.State) error {
 		if p == nil || *p == nil || (*p).Meta() == nil || (*p).Meta().(*conns.AWSClient) == nil {
 			return fmt.Errorf("provider not initialized")
 		}
 
 		providerClient := (*p).Meta().(*conns.AWSClient)
-		defaultTagsConfig := providerClient.DefaultTagsConfig
+		defaultTagsConfig := providerClient.DefaultTagsConfig(ctx)
 
 		if defaultTagsConfig == nil || len(defaultTagsConfig.Tags) == 0 {
 			if len(expectedTags) != 0 {
@@ -734,7 +945,7 @@ func testAccCheckProviderDefaultTags_Tags(t *testing.T, p **schema.Provider, exp
 			var found bool
 
 			for _, actualElement := range actualTags {
-				if aws.StringValue(actualElement.Value) == expectedElement {
+				if aws.ToString(actualElement.Value) == expectedElement {
 					found = true
 					break
 				}
@@ -749,7 +960,7 @@ func testAccCheckProviderDefaultTags_Tags(t *testing.T, p **schema.Provider, exp
 			var found bool
 
 			for _, expectedElement := range expectedTags {
-				if aws.StringValue(actualElement.Value) == expectedElement {
+				if aws.ToString(actualElement.Value) == expectedElement {
 					found = true
 					break
 				}
@@ -764,7 +975,7 @@ func testAccCheckProviderDefaultTags_Tags(t *testing.T, p **schema.Provider, exp
 	}
 }
 
-func testAccCheckEndpoints(p **schema.Provider) resource.TestCheckFunc {
+func testAccCheckUnusualEndpoints(_ context.Context, p **schema.Provider, unusual unusualEndpoint) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		if p == nil || *p == nil || (*p).Meta() == nil || (*p).Meta().(*conns.AWSClient) == nil {
 			return fmt.Errorf("provider not initialized")
@@ -772,46 +983,18 @@ func testAccCheckEndpoints(p **schema.Provider) resource.TestCheckFunc {
 
 		providerClient := (*p).Meta().(*conns.AWSClient)
 
-		for _, serviceKey := range names.ProviderPackages() {
-			method := reflect.ValueOf(providerClient).MethodByName(serviceConn(serviceKey))
-			if !method.IsValid() {
-				continue
-			}
-			result := method.Call([]reflect.Value{})
-			if l := len(result); l != 1 {
-				return fmt.Errorf("expected 1 result, got %d", l)
-			}
-			providerClientField := result[0]
-
-			if !providerClientField.IsValid() {
-				return fmt.Errorf("unable to match conns.AWSClient struct field name for endpoint name: %s", serviceKey)
-			}
-
-			if !reflect.Indirect(providerClientField).FieldByName("Config").IsValid() {
-				continue // currently unknown how to do this check for v2 clients
-			}
-
-			actualEndpoint := reflect.Indirect(reflect.Indirect(providerClientField).FieldByName("Config").FieldByName("Endpoint")).String()
-			expectedEndpoint := fmt.Sprintf("http://%s", serviceKey)
-
-			if actualEndpoint != expectedEndpoint {
-				return fmt.Errorf("expected endpoint (%s) value (%s), got: %s", serviceKey, expectedEndpoint, actualEndpoint)
-			}
+		methodName := serviceClient(unusual.thing)
+		method := reflect.ValueOf(providerClient).MethodByName(methodName)
+		if method.Kind() != reflect.Func {
+			return fmt.Errorf("value %q is not a function", methodName)
+		}
+		if !funcHasConnFuncSignature(method) {
+			return fmt.Errorf("function %q does not match expected signature", methodName)
 		}
 
-		return nil
-	}
-}
-
-func testAccCheckUnusualEndpoints(p **schema.Provider, unusual unusualEndpoint) resource.TestCheckFunc {
-	return func(s *terraform.State) error {
-		if p == nil || *p == nil || (*p).Meta() == nil || (*p).Meta().(*conns.AWSClient) == nil {
-			return fmt.Errorf("provider not initialized")
-		}
-
-		providerClient := (*p).Meta().(*conns.AWSClient)
-
-		result := reflect.ValueOf(providerClient).MethodByName(serviceConn(unusual.thing)).Call([]reflect.Value{})
+		result := method.Call([]reflect.Value{
+			reflect.ValueOf(context.Background()),
+		})
 		if l := len(result); l != 1 {
 			return fmt.Errorf("expected 1 result, got %d", l)
 		}
@@ -819,6 +1002,10 @@ func testAccCheckUnusualEndpoints(p **schema.Provider, unusual unusualEndpoint) 
 
 		if !providerClientField.IsValid() {
 			return fmt.Errorf("unable to match conns.AWSClient struct field name for endpoint name: %s", unusual.thing)
+		}
+
+		if !reflect.Indirect(providerClientField).FieldByName("Config").IsValid() {
+			return nil // currently unknown how to do this check for v2 clients
 		}
 
 		actualEndpoint := reflect.Indirect(reflect.Indirect(providerClientField).FieldByName("Config").FieldByName("Endpoint")).String()
@@ -832,14 +1019,26 @@ func testAccCheckUnusualEndpoints(p **schema.Provider, unusual unusualEndpoint) 
 	}
 }
 
-func serviceConn(key string) string {
-	serviceUpper := ""
+func funcHasConnFuncSignature(method reflect.Value) bool {
+	typ := method.Type()
+	if typ.NumIn() != 1 {
+		return false
+	}
+
+	fn := func(ctx context.Context) {}
+	ftyp := reflect.TypeOf(fn)
+
+	return typ.In(0) == ftyp.In(0)
+}
+
+func serviceClient(key string) string {
+	var serviceUpper string
 	var err error
 	if serviceUpper, err = names.ProviderNameUpper(key); err != nil {
 		return ""
 	}
 
-	return fmt.Sprintf("%sConn", serviceUpper)
+	return fmt.Sprintf("%sClient", serviceUpper)
 }
 
 const testAccProviderConfig_assumeRoleEmpty = `
@@ -861,23 +1060,7 @@ data "aws_service" "provider_test" {
 }
 `
 
-func testAccProviderConfig_endpoints(endpoints string) string {
-	//lintignore:AT004
-	return acctest.ConfigCompose(testAccProviderConfig_base, fmt.Sprintf(`
-provider "aws" {
-  skip_credentials_validation = true
-  skip_get_ec2_platforms      = true
-  skip_metadata_api_check     = true
-  skip_requesting_account_id  = true
-
-  endpoints {
-    %[1]s
-  }
-}
-`, endpoints))
-}
-
-func testAccProviderConfig_fipsEndpoint(endpoint, rName string) string {
+func testAccProviderConfig_customS3Endpoint(endpoint, rName string) string {
 	//lintignore:AT004
 	return acctest.ConfigCompose(testAccProviderConfig_base, fmt.Sprintf(`
 provider "aws" {
@@ -890,30 +1073,54 @@ resource "aws_s3_bucket" "test" {
   bucket        = %[2]q
   force_destroy = true
 }
-
-resource "aws_s3_bucket_acl" "test" {
-  bucket = aws_s3_bucket.test.id
-  acl    = "private"
-}
 `, endpoint, rName))
 }
 
-func testAccProviderConfig_unusualEndpoints(unusual1, unusual2, unusual3 unusualEndpoint) string {
+func testAccProviderConfig_unusualEndpoints(unusual1, unusual2 unusualEndpoint) string {
 	//lintignore:AT004
 	return acctest.ConfigCompose(testAccProviderConfig_base, fmt.Sprintf(`
 provider "aws" {
   skip_credentials_validation = true
-  skip_get_ec2_platforms      = true
   skip_metadata_api_check     = true
   skip_requesting_account_id  = true
 
   endpoints {
     %[1]s = %[2]q
     %[3]s = %[4]q
-    %[5]s = %[6]q
   }
 }
-`, unusual1.fieldName, unusual1.url, unusual2.fieldName, unusual2.url, unusual3.fieldName, unusual3.url))
+`, unusual1.fieldName, unusual1.url, unusual2.fieldName, unusual2.url))
+}
+
+func testAccProviderConfig_useFipsEndpointFlag(rName string) string {
+	//lintignore:AT004
+	return acctest.ConfigCompose(testAccProviderConfig_base, fmt.Sprintf(`
+provider "aws" {
+  use_fips_endpoint = true
+}
+
+resource "aws_s3_bucket" "test" {
+  bucket        = %[1]q
+  force_destroy = true
+}
+`, rName))
+}
+
+func testAccProviderConfig_overridesUseFipsEndpointFlagForAppConfig(rName string) string {
+	appconfig_endpoint := fmt.Sprintf("https://appconfig.%s.%s", acctest.Region(), acctest.PartitionDNSSuffix())
+	//lintignore:AT004
+	return acctest.ConfigCompose(testAccProviderConfig_base, fmt.Sprintf(`
+provider "aws" {
+  use_fips_endpoint = true
+  endpoints {
+	appconfig = %[1]q
+  }
+}
+
+resource "aws_appconfig_application" "test" {
+  name = %[2]q
+}
+`, appconfig_endpoint, rName))
 }
 
 func testAccProviderConfig_ignoreTagsKeys0() string {
@@ -921,7 +1128,6 @@ func testAccProviderConfig_ignoreTagsKeys0() string {
 	return acctest.ConfigCompose(testAccProviderConfig_base, `
 provider "aws" {
   skip_credentials_validation = true
-  skip_get_ec2_platforms      = true
   skip_metadata_api_check     = true
   skip_requesting_account_id  = true
 }
@@ -937,7 +1143,6 @@ provider "aws" {
   }
 
   skip_credentials_validation = true
-  skip_get_ec2_platforms      = true
   skip_metadata_api_check     = true
   skip_requesting_account_id  = true
 }
@@ -953,7 +1158,6 @@ provider "aws" {
   }
 
   skip_credentials_validation = true
-  skip_get_ec2_platforms      = true
   skip_metadata_api_check     = true
   skip_requesting_account_id  = true
 }
@@ -965,7 +1169,6 @@ func testAccProviderConfig_ignoreTagsKeyPrefixes0() string {
 	return acctest.ConfigCompose(testAccProviderConfig_base, `
 provider "aws" {
   skip_credentials_validation = true
-  skip_get_ec2_platforms      = true
   skip_metadata_api_check     = true
   skip_requesting_account_id  = true
 }
@@ -981,7 +1184,6 @@ provider "aws" {
   }
 
   skip_credentials_validation = true
-  skip_get_ec2_platforms      = true
   skip_metadata_api_check     = true
   skip_requesting_account_id  = true
 }
@@ -997,7 +1199,6 @@ provider "aws" {
   }
 
   skip_credentials_validation = true
-  skip_get_ec2_platforms      = true
   skip_metadata_api_check     = true
   skip_requesting_account_id  = true
 }
@@ -1011,7 +1212,6 @@ provider "aws" {
   default_tags {}
 
   skip_credentials_validation = true
-  skip_get_ec2_platforms      = true
   skip_metadata_api_check     = true
   skip_requesting_account_id  = true
 }
@@ -1026,7 +1226,6 @@ provider "aws" {
   ignore_tags {}
 
   skip_credentials_validation = true
-  skip_get_ec2_platforms      = true
   skip_metadata_api_check     = true
   skip_requesting_account_id  = true
 }
@@ -1040,7 +1239,6 @@ provider "aws" {
   ignore_tags {}
 
   skip_credentials_validation = true
-  skip_get_ec2_platforms      = true
   skip_metadata_api_check     = true
   skip_requesting_account_id  = true
 }
@@ -1053,7 +1251,6 @@ func testAccProviderConfig_region(region string) string {
 provider "aws" {
   region                      = %[1]q
   skip_credentials_validation = true
-  skip_get_ec2_platforms      = true
   skip_metadata_api_check     = true
   skip_requesting_account_id  = true
 }
@@ -1067,7 +1264,6 @@ provider "aws" {
   region                      = %[1]q
   sts_region                  = %[2]q
   skip_credentials_validation = true
-  skip_get_ec2_platforms      = true
   skip_metadata_api_check     = true
   skip_requesting_account_id  = true
 }

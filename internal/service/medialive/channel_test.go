@@ -1,3 +1,6 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
 package medialive_test
 
 import (
@@ -8,9 +11,9 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/service/medialive"
 	"github.com/aws/aws-sdk-go-v2/service/medialive/types"
-	sdkacctest "github.com/hashicorp/terraform-plugin-sdk/v2/helper/acctest"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
+	sdkacctest "github.com/hashicorp/terraform-plugin-testing/helper/acctest"
+	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/terraform"
 	"github.com/hashicorp/terraform-provider-aws/internal/acctest"
 	"github.com/hashicorp/terraform-provider-aws/internal/conns"
 	"github.com/hashicorp/terraform-provider-aws/internal/create"
@@ -35,7 +38,7 @@ func TestAccMediaLiveChannel_basic(t *testing.T) {
 			acctest.PreCheckPartitionHasService(t, names.MediaLiveEndpointID)
 			testAccChannelsPreCheck(ctx, t)
 		},
-		ErrorCheck:               acctest.ErrorCheck(t, names.MediaLiveEndpointID),
+		ErrorCheck:               acctest.ErrorCheck(t, names.MediaLiveServiceID),
 		ProtoV5ProviderFactories: acctest.ProtoV5ProviderFactories,
 		CheckDestroy:             testAccCheckChannelDestroy(ctx),
 		Steps: []resource.TestStep{
@@ -45,8 +48,8 @@ func TestAccMediaLiveChannel_basic(t *testing.T) {
 					testAccCheckChannelExists(ctx, resourceName, &channel),
 					resource.TestCheckResourceAttrSet(resourceName, "channel_id"),
 					resource.TestCheckResourceAttr(resourceName, "channel_class", "STANDARD"),
-					resource.TestCheckResourceAttr(resourceName, "name", rName),
-					resource.TestCheckResourceAttrSet(resourceName, "role_arn"),
+					resource.TestCheckResourceAttr(resourceName, names.AttrName, rName),
+					resource.TestCheckResourceAttrSet(resourceName, names.AttrRoleARN),
 					resource.TestCheckResourceAttr(resourceName, "input_specification.0.codec", "AVC"),
 					resource.TestCheckResourceAttr(resourceName, "input_specification.0.input_resolution", "HD"),
 					resource.TestCheckResourceAttr(resourceName, "input_specification.0.maximum_bitrate", "MAX_20_MBPS"),
@@ -54,15 +57,15 @@ func TestAccMediaLiveChannel_basic(t *testing.T) {
 						"input_attachment_name": "example-input1",
 					}),
 					resource.TestCheckTypeSetElemNestedAttrs(resourceName, "destinations.*", map[string]string{
-						"id": rName,
+						names.AttrID: rName,
 					}),
 					resource.TestCheckResourceAttr(resourceName, "encoder_settings.0.timecode_config.0.source", "EMBEDDED"),
 					resource.TestCheckTypeSetElemNestedAttrs(resourceName, "encoder_settings.0.audio_descriptions.*", map[string]string{
 						"audio_selector_name": rName,
-						"name":                rName,
+						names.AttrName:        rName,
 					}),
 					resource.TestCheckTypeSetElemNestedAttrs(resourceName, "encoder_settings.0.video_descriptions.*", map[string]string{
-						"name": "test-video-name",
+						names.AttrName: "test-video-name",
 					}),
 				),
 			},
@@ -76,7 +79,7 @@ func TestAccMediaLiveChannel_basic(t *testing.T) {
 	})
 }
 
-func TestAccMediaLiveChannel_m2ts_settings(t *testing.T) {
+func TestAccMediaLiveChannel_captionDescriptions(t *testing.T) {
 	ctx := acctest.Context(t)
 	if testing.Short() {
 		t.Skip("skipping long-running test in short mode")
@@ -92,7 +95,70 @@ func TestAccMediaLiveChannel_m2ts_settings(t *testing.T) {
 			acctest.PreCheckPartitionHasService(t, names.MediaLiveEndpointID)
 			testAccChannelsPreCheck(ctx, t)
 		},
-		ErrorCheck:               acctest.ErrorCheck(t, names.MediaLiveEndpointID),
+		ErrorCheck:               acctest.ErrorCheck(t, names.MediaLiveServiceID),
+		ProtoV5ProviderFactories: acctest.ProtoV5ProviderFactories,
+		CheckDestroy:             testAccCheckChannelDestroy(ctx),
+		Steps: []resource.TestStep{
+			{
+				Config: testAccChannelConfig_caption_descriptions(rName, 100),
+				Check: resource.ComposeTestCheckFunc(
+					testAccCheckChannelExists(ctx, resourceName, &channel),
+					resource.TestCheckResourceAttrSet(resourceName, "channel_id"),
+					resource.TestCheckResourceAttr(resourceName, "channel_class", "STANDARD"),
+					resource.TestCheckResourceAttr(resourceName, names.AttrName, rName),
+					resource.TestCheckResourceAttrSet(resourceName, names.AttrRoleARN),
+					resource.TestCheckResourceAttr(resourceName, "input_specification.0.codec", "AVC"),
+					resource.TestCheckResourceAttr(resourceName, "input_specification.0.input_resolution", "HD"),
+					resource.TestCheckResourceAttr(resourceName, "input_specification.0.maximum_bitrate", "MAX_20_MBPS"),
+					resource.TestCheckTypeSetElemNestedAttrs(resourceName, "input_attachments.*", map[string]string{
+						"input_attachment_name": "example-input1",
+					}),
+					resource.TestCheckTypeSetElemNestedAttrs(resourceName, "destinations.*", map[string]string{
+						names.AttrID: rName,
+					}),
+					resource.TestCheckResourceAttr(resourceName, "encoder_settings.0.timecode_config.0.source", "EMBEDDED"),
+					resource.TestCheckTypeSetElemNestedAttrs(resourceName, "encoder_settings.0.caption_descriptions.*", map[string]string{
+						"caption_selector_name": rName,
+						names.AttrName:          "test-caption-name",
+						"destination_settings.0.dvb_sub_destination_settings.0.font_resolution": "100",
+					}),
+					resource.TestCheckTypeSetElemNestedAttrs(resourceName, "encoder_settings.0.caption_descriptions.*", map[string]string{
+						"caption_selector_name": "test-caption-selector-teletext",
+						names.AttrName:          "test-caption-name-teletext",
+						"destination_settings.0.teletext_destination_settings.0": "",
+					}),
+					resource.TestCheckTypeSetElemNestedAttrs(resourceName, "encoder_settings.0.video_descriptions.*", map[string]string{
+						names.AttrName: "test-video-name",
+					}),
+				),
+			},
+			{
+				ResourceName:            resourceName,
+				ImportState:             true,
+				ImportStateVerify:       true,
+				ImportStateVerifyIgnore: []string{"start_channel"},
+			},
+		},
+	})
+}
+
+func TestAccMediaLiveChannel_M2TS_settings(t *testing.T) {
+	ctx := acctest.Context(t)
+	if testing.Short() {
+		t.Skip("skipping long-running test in short mode")
+	}
+
+	var channel medialive.DescribeChannelOutput
+	rName := sdkacctest.RandomWithPrefix(acctest.ResourcePrefix)
+	resourceName := "aws_medialive_channel.test"
+
+	resource.ParallelTest(t, resource.TestCase{
+		PreCheck: func() {
+			acctest.PreCheck(ctx, t)
+			acctest.PreCheckPartitionHasService(t, names.MediaLiveEndpointID)
+			testAccChannelsPreCheck(ctx, t)
+		},
+		ErrorCheck:               acctest.ErrorCheck(t, names.MediaLiveServiceID),
 		ProtoV5ProviderFactories: acctest.ProtoV5ProviderFactories,
 		CheckDestroy:             testAccCheckChannelDestroy(ctx),
 		Steps: []resource.TestStep{
@@ -102,8 +168,8 @@ func TestAccMediaLiveChannel_m2ts_settings(t *testing.T) {
 					testAccCheckChannelExists(ctx, resourceName, &channel),
 					resource.TestCheckResourceAttrSet(resourceName, "channel_id"),
 					resource.TestCheckResourceAttr(resourceName, "channel_class", "STANDARD"),
-					resource.TestCheckResourceAttr(resourceName, "name", rName),
-					resource.TestCheckResourceAttrSet(resourceName, "role_arn"),
+					resource.TestCheckResourceAttr(resourceName, names.AttrName, rName),
+					resource.TestCheckResourceAttrSet(resourceName, names.AttrRoleARN),
 					resource.TestCheckResourceAttr(resourceName, "input_specification.0.codec", "AVC"),
 					resource.TestCheckResourceAttr(resourceName, "input_specification.0.input_resolution", "HD"),
 					resource.TestCheckResourceAttr(resourceName, "input_specification.0.maximum_bitrate", "MAX_20_MBPS"),
@@ -111,15 +177,15 @@ func TestAccMediaLiveChannel_m2ts_settings(t *testing.T) {
 						"input_attachment_name": "example-input1",
 					}),
 					resource.TestCheckTypeSetElemNestedAttrs(resourceName, "destinations.*", map[string]string{
-						"id": rName,
+						names.AttrID: rName,
 					}),
 					resource.TestCheckResourceAttr(resourceName, "encoder_settings.0.timecode_config.0.source", "EMBEDDED"),
 					resource.TestCheckTypeSetElemNestedAttrs(resourceName, "encoder_settings.0.audio_descriptions.*", map[string]string{
 						"audio_selector_name": rName,
-						"name":                rName,
+						names.AttrName:        rName,
 					}),
 					resource.TestCheckTypeSetElemNestedAttrs(resourceName, "encoder_settings.0.video_descriptions.*", map[string]string{
-						"name": "test-video-name",
+						names.AttrName: "test-video-name",
 					}),
 					resource.TestCheckTypeSetElemNestedAttrs(resourceName, "encoder_settings.0.output_groups.0.outputs.0.output_settings.0.archive_output_settings.0.container_settings.0.m2ts_settings.*", map[string]string{
 						"audio_buffer_model":        "ATSC",
@@ -130,6 +196,9 @@ func TestAccMediaLiveChannel_m2ts_settings(t *testing.T) {
 						"arib_captions_pid":         "100",
 						"arib_captions_pid_control": "AUTO",
 						"video_pid":                 "101",
+						"fragment_time":             "1.92",
+						"program_num":               "1",
+						"segmentation_time":         "1.92",
 					}),
 				),
 			},
@@ -159,7 +228,7 @@ func TestAccMediaLiveChannel_UDP_outputSettings(t *testing.T) {
 			acctest.PreCheckPartitionHasService(t, names.MediaLiveEndpointID)
 			testAccChannelsPreCheck(ctx, t)
 		},
-		ErrorCheck:               acctest.ErrorCheck(t, names.MediaLiveEndpointID),
+		ErrorCheck:               acctest.ErrorCheck(t, names.MediaLiveServiceID),
 		ProtoV5ProviderFactories: acctest.ProtoV5ProviderFactories,
 		CheckDestroy:             testAccCheckChannelDestroy(ctx),
 		Steps: []resource.TestStep{
@@ -169,8 +238,8 @@ func TestAccMediaLiveChannel_UDP_outputSettings(t *testing.T) {
 					testAccCheckChannelExists(ctx, resourceName, &channel),
 					resource.TestCheckResourceAttrSet(resourceName, "channel_id"),
 					resource.TestCheckResourceAttr(resourceName, "channel_class", "STANDARD"),
-					resource.TestCheckResourceAttr(resourceName, "name", rName),
-					resource.TestCheckResourceAttrSet(resourceName, "role_arn"),
+					resource.TestCheckResourceAttr(resourceName, names.AttrName, rName),
+					resource.TestCheckResourceAttrSet(resourceName, names.AttrRoleARN),
 					resource.TestCheckResourceAttr(resourceName, "input_specification.0.codec", "AVC"),
 					resource.TestCheckResourceAttr(resourceName, "input_specification.0.input_resolution", "HD"),
 					resource.TestCheckResourceAttr(resourceName, "input_specification.0.maximum_bitrate", "MAX_20_MBPS"),
@@ -178,15 +247,15 @@ func TestAccMediaLiveChannel_UDP_outputSettings(t *testing.T) {
 						"input_attachment_name": "example-input1",
 					}),
 					resource.TestCheckTypeSetElemNestedAttrs(resourceName, "destinations.*", map[string]string{
-						"id": rName,
+						names.AttrID: rName,
 					}),
 					resource.TestCheckResourceAttr(resourceName, "encoder_settings.0.timecode_config.0.source", "EMBEDDED"),
 					resource.TestCheckTypeSetElemNestedAttrs(resourceName, "encoder_settings.0.audio_descriptions.*", map[string]string{
 						"audio_selector_name": rName,
-						"name":                rName,
+						names.AttrName:        rName,
 					}),
 					resource.TestCheckTypeSetElemNestedAttrs(resourceName, "encoder_settings.0.video_descriptions.*", map[string]string{
-						"name": "test-video-name",
+						names.AttrName: "test-video-name",
 					}),
 					resource.TestCheckTypeSetElemNestedAttrs(resourceName, "encoder_settings.0.output_groups.0.outputs.0.output_settings.0.udp_output_settings.0.fec_output_settings.*", map[string]string{
 						"include_fec":  "COLUMN_AND_ROW",
@@ -221,7 +290,7 @@ func TestAccMediaLiveChannel_MsSmooth_outputSettings(t *testing.T) {
 			acctest.PreCheckPartitionHasService(t, names.MediaLiveEndpointID)
 			testAccChannelsPreCheck(ctx, t)
 		},
-		ErrorCheck:               acctest.ErrorCheck(t, names.MediaLiveEndpointID),
+		ErrorCheck:               acctest.ErrorCheck(t, names.MediaLiveServiceID),
 		ProtoV5ProviderFactories: acctest.ProtoV5ProviderFactories,
 		CheckDestroy:             testAccCheckChannelDestroy(ctx),
 		Steps: []resource.TestStep{
@@ -231,8 +300,8 @@ func TestAccMediaLiveChannel_MsSmooth_outputSettings(t *testing.T) {
 					testAccCheckChannelExists(ctx, resourceName, &channel),
 					resource.TestCheckResourceAttrSet(resourceName, "channel_id"),
 					resource.TestCheckResourceAttr(resourceName, "channel_class", "STANDARD"),
-					resource.TestCheckResourceAttr(resourceName, "name", rName),
-					resource.TestCheckResourceAttrSet(resourceName, "role_arn"),
+					resource.TestCheckResourceAttr(resourceName, names.AttrName, rName),
+					resource.TestCheckResourceAttrSet(resourceName, names.AttrRoleARN),
 					resource.TestCheckResourceAttr(resourceName, "input_specification.0.codec", "AVC"),
 					resource.TestCheckResourceAttr(resourceName, "input_specification.0.input_resolution", "HD"),
 					resource.TestCheckResourceAttr(resourceName, "input_specification.0.maximum_bitrate", "MAX_20_MBPS"),
@@ -240,15 +309,15 @@ func TestAccMediaLiveChannel_MsSmooth_outputSettings(t *testing.T) {
 						"input_attachment_name": "example-input1",
 					}),
 					resource.TestCheckTypeSetElemNestedAttrs(resourceName, "destinations.*", map[string]string{
-						"id": rName,
+						names.AttrID: rName,
 					}),
 					resource.TestCheckResourceAttr(resourceName, "encoder_settings.0.timecode_config.0.source", "EMBEDDED"),
 					resource.TestCheckTypeSetElemNestedAttrs(resourceName, "encoder_settings.0.audio_descriptions.*", map[string]string{
 						"audio_selector_name": rName,
-						"name":                rName,
+						names.AttrName:        rName,
 					}),
 					resource.TestCheckTypeSetElemNestedAttrs(resourceName, "encoder_settings.0.video_descriptions.*", map[string]string{
-						"name": "test-video-name",
+						names.AttrName: "test-video-name",
 					}),
 					resource.TestCheckTypeSetElemNestedAttrs(resourceName, "encoder_settings.0.output_groups.0.outputs.0.output_settings.0.ms_smooth_output_settings.*", map[string]string{
 						"name_modifier": rName,
@@ -265,7 +334,7 @@ func TestAccMediaLiveChannel_MsSmooth_outputSettings(t *testing.T) {
 	})
 }
 
-func TestAccMediaLiveChannel_audioDescriptions_codecSettings(t *testing.T) {
+func TestAccMediaLiveChannel_AudioDescriptions_codecSettings(t *testing.T) {
 	ctx := acctest.Context(t)
 	if testing.Short() {
 		t.Skip("skipping long-running test in short mode")
@@ -281,7 +350,7 @@ func TestAccMediaLiveChannel_audioDescriptions_codecSettings(t *testing.T) {
 			acctest.PreCheckPartitionHasService(t, names.MediaLiveEndpointID)
 			testAccChannelsPreCheck(ctx, t)
 		},
-		ErrorCheck:               acctest.ErrorCheck(t, names.MediaLiveEndpointID),
+		ErrorCheck:               acctest.ErrorCheck(t, names.MediaLiveServiceID),
 		ProtoV5ProviderFactories: acctest.ProtoV5ProviderFactories,
 		CheckDestroy:             testAccCheckChannelDestroy(ctx),
 		Steps: []resource.TestStep{
@@ -291,8 +360,8 @@ func TestAccMediaLiveChannel_audioDescriptions_codecSettings(t *testing.T) {
 					testAccCheckChannelExists(ctx, resourceName, &channel),
 					resource.TestCheckResourceAttrSet(resourceName, "channel_id"),
 					resource.TestCheckResourceAttr(resourceName, "channel_class", "STANDARD"),
-					resource.TestCheckResourceAttr(resourceName, "name", rName),
-					resource.TestCheckResourceAttrSet(resourceName, "role_arn"),
+					resource.TestCheckResourceAttr(resourceName, names.AttrName, rName),
+					resource.TestCheckResourceAttrSet(resourceName, names.AttrRoleARN),
 					resource.TestCheckResourceAttr(resourceName, "input_specification.0.codec", "AVC"),
 					resource.TestCheckResourceAttr(resourceName, "input_specification.0.input_resolution", "HD"),
 					resource.TestCheckResourceAttr(resourceName, "input_specification.0.maximum_bitrate", "MAX_20_MBPS"),
@@ -300,25 +369,233 @@ func TestAccMediaLiveChannel_audioDescriptions_codecSettings(t *testing.T) {
 						"input_attachment_name": "example-input1",
 					}),
 					resource.TestCheckTypeSetElemNestedAttrs(resourceName, "destinations.*", map[string]string{
-						"id": rName,
+						names.AttrID: rName,
 					}),
 					resource.TestCheckResourceAttr(resourceName, "encoder_settings.0.timecode_config.0.source", "EMBEDDED"),
 					resource.TestCheckTypeSetElemNestedAttrs(resourceName, "encoder_settings.0.audio_descriptions.*", map[string]string{
 						"audio_selector_name": "audio_1",
-						"name":                "audio_1",
+						names.AttrName:        "audio_1",
 						"codec_settings.0.aac_settings.0.rate_control_mode": string(types.AacRateControlModeCbr),
 						"codec_settings.0.aac_settings.0.bitrate":           "192000",
 						"codec_settings.0.aac_settings.0.sample_rate":       "48000",
 					}),
 					resource.TestCheckTypeSetElemNestedAttrs(resourceName, "encoder_settings.0.audio_descriptions.*", map[string]string{
-						"audio_selector_name": "audio_2",
-						"name":                "audio_2",
+						"audio_selector_name":                     "audio_2",
+						names.AttrName:                            "audio_2",
 						"codec_settings.0.ac3_settings.0.bitrate": "384000",
 					}),
 					resource.TestCheckTypeSetElemNestedAttrs(resourceName, "encoder_settings.0.video_descriptions.*", map[string]string{
-						"name": "test-video-name",
+						names.AttrName: "test-video-name",
 					}),
 				),
+			},
+		},
+	})
+}
+
+func TestAccMediaLiveChannel_VideoDescriptions_CodecSettings_h264Settings(t *testing.T) {
+	ctx := acctest.Context(t)
+	if testing.Short() {
+		t.Skip("skipping long-running test in short mode")
+	}
+
+	var channel medialive.DescribeChannelOutput
+	rName := sdkacctest.RandomWithPrefix(acctest.ResourcePrefix)
+	resourceName := "aws_medialive_channel.test"
+
+	resource.ParallelTest(t, resource.TestCase{
+		PreCheck: func() {
+			acctest.PreCheck(ctx, t)
+			acctest.PreCheckPartitionHasService(t, names.MediaLiveEndpointID)
+			testAccChannelsPreCheck(ctx, t)
+		},
+		ErrorCheck:               acctest.ErrorCheck(t, names.MediaLiveServiceID),
+		ProtoV5ProviderFactories: acctest.ProtoV5ProviderFactories,
+		CheckDestroy:             testAccCheckChannelDestroy(ctx),
+		Steps: []resource.TestStep{
+			{
+				Config: testAccChannelConfig_videoDescriptionCodecSettingsH264Settings(rName),
+				Check: resource.ComposeTestCheckFunc(
+					testAccCheckChannelExists(ctx, resourceName, &channel),
+					resource.TestCheckResourceAttrSet(resourceName, "channel_id"),
+					resource.TestCheckResourceAttr(resourceName, "channel_class", "STANDARD"),
+					resource.TestCheckResourceAttr(resourceName, names.AttrName, rName),
+					resource.TestCheckResourceAttrSet(resourceName, names.AttrRoleARN),
+					resource.TestCheckResourceAttr(resourceName, "input_specification.0.codec", "AVC"),
+					resource.TestCheckResourceAttr(resourceName, "input_specification.0.input_resolution", "HD"),
+					resource.TestCheckResourceAttr(resourceName, "input_specification.0.maximum_bitrate", "MAX_20_MBPS"),
+					resource.TestCheckTypeSetElemNestedAttrs(resourceName, "input_attachments.*", map[string]string{
+						"input_attachment_name": "example-input1",
+					}),
+					resource.TestCheckTypeSetElemNestedAttrs(resourceName, "destinations.*", map[string]string{
+						names.AttrID: rName,
+					}),
+					resource.TestCheckResourceAttr(resourceName, "encoder_settings.0.timecode_config.0.source", "EMBEDDED"),
+					resource.TestCheckTypeSetElemNestedAttrs(resourceName, "encoder_settings.0.audio_descriptions.*", map[string]string{
+						"audio_selector_name": rName,
+						names.AttrName:        rName,
+					}),
+					resource.TestCheckTypeSetElemNestedAttrs(resourceName, "encoder_settings.0.video_descriptions.*", map[string]string{
+						names.AttrName:     "test-video-name",
+						"respond_to_afd":   "NONE",
+						"scaling_behavior": "DEFAULT",
+						"sharpness":        "100",
+						"height":           "720",
+						"width":            "1280",
+					}),
+					resource.TestCheckTypeSetElemNestedAttrs(resourceName, "encoder_settings.0.video_descriptions.0.codec_settings.0.h264_settings.*", map[string]string{
+						"adaptive_quantization":   "LOW",
+						"afd_signaling":           "NONE",
+						"bitrate":                 "5400000",
+						"buf_fill_pct":            "90",
+						"buf_size":                "10800000",
+						"color_metadata":          "IGNORE",
+						"entropy_encoding":        "CABAC",
+						"filter_settings":         "",
+						"fixed_afd":               "",
+						"flicker_aq":              "ENABLED",
+						"force_field_pictures":    "DISABLED",
+						"framerate_control":       "SPECIFIED",
+						"framerate_denominator":   "1",
+						"framerate_numerator":     "50",
+						"gop_b_reference":         "DISABLED",
+						"gop_closed_cadence":      "1",
+						"gop_num_b_frames":        "1",
+						"gop_size":                "1.92",
+						"gop_size_units":          "SECONDS",
+						"level":                   "H264_LEVEL_AUTO",
+						"look_ahead_rate_control": "HIGH",
+						"max_bitrate":             "0",
+						"min_i_interval":          "0",
+						"num_ref_frames":          "3",
+						"par_control":             "INITIALIZE_FROM_SOURCE",
+						"par_denominator":         "0",
+						"par_numerator":           "0",
+						names.AttrProfile:         "HIGH",
+						"quality_level":           "",
+						"qvbr_quality_level":      "0",
+						"rate_control_mode":       "CBR",
+						"scan_type":               "PROGRESSIVE",
+						"scene_change_detect":     "DISABLED",
+						"slices":                  "1",
+						"spatial_aq":              "0",
+						"subgop_length":           "FIXED",
+						"syntax":                  "DEFAULT",
+						"temporal_aq":             "ENABLED",
+						"timecode_insertion":      "PIC_TIMING_SEI",
+					}),
+				),
+			},
+			{
+				ResourceName:            resourceName,
+				ImportState:             true,
+				ImportStateVerify:       true,
+				ImportStateVerifyIgnore: []string{"start_channel"},
+			},
+		},
+	})
+}
+
+func TestAccMediaLiveChannel_VideoDescriptions_CodecSettings_h265Settings(t *testing.T) {
+	ctx := acctest.Context(t)
+	if testing.Short() {
+		t.Skip("skipping long-running test in short mode")
+	}
+
+	var channel medialive.DescribeChannelOutput
+	rName := sdkacctest.RandomWithPrefix(acctest.ResourcePrefix)
+	resourceName := "aws_medialive_channel.test"
+
+	resource.ParallelTest(t, resource.TestCase{
+		PreCheck: func() {
+			acctest.PreCheck(ctx, t)
+			acctest.PreCheckPartitionHasService(t, names.MediaLiveEndpointID)
+			testAccChannelsPreCheck(ctx, t)
+		},
+		ErrorCheck:               acctest.ErrorCheck(t, names.MediaLiveServiceID),
+		ProtoV5ProviderFactories: acctest.ProtoV5ProviderFactories,
+		CheckDestroy:             testAccCheckChannelDestroy(ctx),
+		Steps: []resource.TestStep{
+			{
+				Config: testAccChannelConfig_videoDescriptionCodecSettingsH265Settings(rName),
+				Check: resource.ComposeTestCheckFunc(
+					testAccCheckChannelExists(ctx, resourceName, &channel),
+					resource.TestCheckResourceAttrSet(resourceName, "channel_id"),
+					resource.TestCheckResourceAttr(resourceName, "channel_class", "STANDARD"),
+					resource.TestCheckResourceAttr(resourceName, names.AttrName, rName),
+					resource.TestCheckResourceAttrSet(resourceName, names.AttrRoleARN),
+					resource.TestCheckResourceAttr(resourceName, "input_specification.0.codec", "AVC"),
+					resource.TestCheckResourceAttr(resourceName, "input_specification.0.input_resolution", "HD"),
+					resource.TestCheckResourceAttr(resourceName, "input_specification.0.maximum_bitrate", "MAX_20_MBPS"),
+					resource.TestCheckTypeSetElemNestedAttrs(resourceName, "input_attachments.*", map[string]string{
+						"input_attachment_name": "example-input1",
+					}),
+					resource.TestCheckTypeSetElemNestedAttrs(resourceName, "destinations.*", map[string]string{
+						names.AttrID: rName,
+					}),
+					resource.TestCheckResourceAttr(resourceName, "encoder_settings.0.timecode_config.0.source", "EMBEDDED"),
+					resource.TestCheckTypeSetElemNestedAttrs(resourceName, "encoder_settings.0.audio_descriptions.*", map[string]string{
+						"audio_selector_name": rName,
+						names.AttrName:        rName,
+					}),
+					resource.TestCheckTypeSetElemNestedAttrs(resourceName, "encoder_settings.0.video_descriptions.*", map[string]string{
+						names.AttrName:     "test-video-name",
+						"respond_to_afd":   "NONE",
+						"scaling_behavior": "DEFAULT",
+						"sharpness":        "100",
+						"height":           "720",
+						"width":            "1280",
+					}),
+					resource.TestCheckTypeSetElemNestedAttrs(resourceName, "encoder_settings.0.video_descriptions.0.codec_settings.0.h265_settings.*", map[string]string{
+						"adaptive_quantization":      "LOW",
+						"afd_signaling":              "FIXED",
+						"bitrate":                    "5400000",
+						"buf_size":                   "20000000",
+						"color_metadata":             "IGNORE",
+						"fixed_afd":                  "AFD_0000",
+						"flicker_aq":                 "ENABLED",
+						"framerate_denominator":      "1",
+						"framerate_numerator":        "50",
+						"gop_closed_cadence":         "1",
+						"gop_size":                   "1.92",
+						"gop_size_units":             "SECONDS",
+						"level":                      "H265_LEVEL_AUTO",
+						"look_ahead_rate_control":    "HIGH",
+						"min_i_interval":             "6",
+						"min_qp":                     "0",
+						"mv_over_picture_boundaries": "ENABLED",
+						"mv_temporal_predictor":      "ENABLED",
+						names.AttrProfile:            "MAIN_10BIT",
+						"rate_control_mode":          "CBR",
+						"scan_type":                  "PROGRESSIVE",
+						"scene_change_detect":        "ENABLED",
+						"slices":                     "2",
+						"tier":                       "HIGH",
+						"tile_height":                "64",
+						"tile_padding":               "PADDED",
+						"tile_width":                 "256",
+						"treeblock_size":             "AUTO",
+					}),
+					resource.TestCheckTypeSetElemNestedAttrs(resourceName, "encoder_settings.0.video_descriptions.0.codec_settings.0.h265_settings.0.color_space_settings.0.hdr10_settings.*", map[string]string{
+						"max_cll":  "16",
+						"max_fall": "16",
+					}),
+					resource.TestCheckTypeSetElemNestedAttrs(resourceName, "encoder_settings.0.video_descriptions.0.codec_settings.0.h265_settings.0.filter_settings.0.temporal_filter_settings.*", map[string]string{
+						"post_filter_sharpening": "AUTO",
+						"strength":               "STRENGTH_1",
+					}),
+					resource.TestCheckTypeSetElemNestedAttrs(resourceName, "encoder_settings.0.video_descriptions.0.codec_settings.0.h265_settings.0.timecode_burnin_settings.*", map[string]string{
+						"timecode_burnin_font_size": "SMALL_16",
+						"timecode_burnin_position":  "BOTTOM_CENTER",
+						names.AttrPrefix:            "terraform-test",
+					}),
+				),
+			},
+			{
+				ResourceName:            resourceName,
+				ImportState:             true,
+				ImportStateVerify:       true,
+				ImportStateVerifyIgnore: []string{"start_channel"},
 			},
 		},
 	})
@@ -340,7 +617,7 @@ func TestAccMediaLiveChannel_hls(t *testing.T) {
 			acctest.PreCheckPartitionHasService(t, names.MediaLiveEndpointID)
 			testAccChannelsPreCheck(ctx, t)
 		},
-		ErrorCheck:               acctest.ErrorCheck(t, names.MediaLiveEndpointID),
+		ErrorCheck:               acctest.ErrorCheck(t, names.MediaLiveServiceID),
 		ProtoV5ProviderFactories: acctest.ProtoV5ProviderFactories,
 		CheckDestroy:             testAccCheckChannelDestroy(ctx),
 		Steps: []resource.TestStep{
@@ -350,8 +627,8 @@ func TestAccMediaLiveChannel_hls(t *testing.T) {
 					testAccCheckChannelExists(ctx, resourceName, &channel),
 					resource.TestCheckResourceAttrSet(resourceName, "channel_id"),
 					resource.TestCheckResourceAttr(resourceName, "channel_class", "STANDARD"),
-					resource.TestCheckResourceAttr(resourceName, "name", rName),
-					resource.TestCheckResourceAttrSet(resourceName, "role_arn"),
+					resource.TestCheckResourceAttr(resourceName, names.AttrName, rName),
+					resource.TestCheckResourceAttrSet(resourceName, names.AttrRoleARN),
 					resource.TestCheckResourceAttr(resourceName, "input_specification.0.codec", "AVC"),
 					resource.TestCheckResourceAttr(resourceName, "input_specification.0.input_resolution", "HD"),
 					resource.TestCheckResourceAttr(resourceName, "input_specification.0.maximum_bitrate", "MAX_20_MBPS"),
@@ -359,17 +636,66 @@ func TestAccMediaLiveChannel_hls(t *testing.T) {
 						"input_attachment_name": "example-input1",
 					}),
 					resource.TestCheckTypeSetElemNestedAttrs(resourceName, "destinations.*", map[string]string{
-						"id": rName,
+						names.AttrID: rName,
 					}),
 					resource.TestCheckResourceAttr(resourceName, "encoder_settings.0.timecode_config.0.source", "EMBEDDED"),
 					resource.TestCheckTypeSetElemNestedAttrs(resourceName, "encoder_settings.0.audio_descriptions.*", map[string]string{
 						"audio_selector_name": rName,
-						"name":                rName,
+						names.AttrName:        rName,
 					}),
 					resource.TestCheckTypeSetElemNestedAttrs(resourceName, "encoder_settings.0.video_descriptions.*", map[string]string{
-						"name": "test-video-name",
+						names.AttrName: "test-video-name",
 					}),
 					resource.TestCheckResourceAttr(resourceName, "encoder_settings.0.output_groups.0.outputs.0.output_settings.0.hls_output_settings.0.h265_packaging_type", "HVC1"),
+					resource.TestCheckResourceAttr(resourceName, "encoder_settings.0.output_groups.0.output_group_settings.0.hls_group_settings.0.client_cache", "ENABLED"),
+				),
+			},
+		},
+	})
+}
+
+func TestAccMediaLiveChannel_noAudio(t *testing.T) {
+	ctx := acctest.Context(t)
+	if testing.Short() {
+		t.Skip("skipping long-running test in short mode")
+	}
+
+	var channel medialive.DescribeChannelOutput
+	rName := sdkacctest.RandomWithPrefix(acctest.ResourcePrefix)
+	resourceName := "aws_medialive_channel.test"
+
+	resource.ParallelTest(t, resource.TestCase{
+		PreCheck: func() {
+			acctest.PreCheck(ctx, t)
+			acctest.PreCheckPartitionHasService(t, names.MediaLiveEndpointID)
+			testAccChannelsPreCheck(ctx, t)
+		},
+		ErrorCheck:               acctest.ErrorCheck(t, names.MediaLiveServiceID),
+		ProtoV5ProviderFactories: acctest.ProtoV5ProviderFactories,
+		CheckDestroy:             testAccCheckChannelDestroy(ctx),
+		Steps: []resource.TestStep{
+			{
+				Config: testAccChannelConfig_noAudio(rName),
+				Check: resource.ComposeTestCheckFunc(
+					testAccCheckChannelExists(ctx, resourceName, &channel),
+					resource.TestCheckResourceAttrSet(resourceName, "channel_id"),
+					resource.TestCheckResourceAttr(resourceName, "channel_class", "STANDARD"),
+					resource.TestCheckResourceAttr(resourceName, names.AttrName, rName),
+					resource.TestCheckResourceAttrSet(resourceName, names.AttrRoleARN),
+					resource.TestCheckResourceAttr(resourceName, "input_specification.0.codec", "AVC"),
+					resource.TestCheckResourceAttr(resourceName, "input_specification.0.input_resolution", "HD"),
+					resource.TestCheckResourceAttr(resourceName, "input_specification.0.maximum_bitrate", "MAX_20_MBPS"),
+					resource.TestCheckTypeSetElemNestedAttrs(resourceName, "input_attachments.*", map[string]string{
+						"input_attachment_name": "example-input1",
+					}),
+					resource.TestCheckTypeSetElemNestedAttrs(resourceName, "destinations.*", map[string]string{
+						names.AttrID: rName,
+					}),
+					resource.TestCheckResourceAttr(resourceName, "encoder_settings.0.timecode_config.0.source", "EMBEDDED"),
+					resource.TestCheckTypeSetElemNestedAttrs(resourceName, "encoder_settings.0.video_descriptions.*", map[string]string{
+						names.AttrName: "test-video-name",
+					}),
+					resource.TestCheckNoResourceAttr(resourceName, "encoder_settings.0.audio_descriptions.*"),
 				),
 			},
 		},
@@ -392,7 +718,7 @@ func TestAccMediaLiveChannel_status(t *testing.T) {
 			acctest.PreCheckPartitionHasService(t, names.MediaLiveEndpointID)
 			testAccChannelsPreCheck(ctx, t)
 		},
-		ErrorCheck:               acctest.ErrorCheck(t, names.MediaLiveEndpointID),
+		ErrorCheck:               acctest.ErrorCheck(t, names.MediaLiveServiceID),
 		ProtoV5ProviderFactories: acctest.ProtoV5ProviderFactories,
 		CheckDestroy:             testAccCheckChannelDestroy(ctx),
 		Steps: []resource.TestStep{
@@ -431,7 +757,7 @@ func TestAccMediaLiveChannel_update(t *testing.T) {
 			acctest.PreCheckPartitionHasService(t, names.MediaLiveEndpointID)
 			testAccChannelsPreCheck(ctx, t)
 		},
-		ErrorCheck:               acctest.ErrorCheck(t, names.MediaLiveEndpointID),
+		ErrorCheck:               acctest.ErrorCheck(t, names.MediaLiveServiceID),
 		ProtoV5ProviderFactories: acctest.ProtoV5ProviderFactories,
 		CheckDestroy:             testAccCheckChannelDestroy(ctx),
 		Steps: []resource.TestStep{
@@ -439,10 +765,10 @@ func TestAccMediaLiveChannel_update(t *testing.T) {
 				Config: testAccChannelConfig_update(rName, rName, "AVC", "HD"),
 				Check: resource.ComposeTestCheckFunc(
 					testAccCheckChannelExists(ctx, resourceName, &channel),
-					resource.TestCheckResourceAttr(resourceName, "name", rName),
+					resource.TestCheckResourceAttr(resourceName, names.AttrName, rName),
 					resource.TestCheckResourceAttrSet(resourceName, "channel_id"),
 					resource.TestCheckResourceAttr(resourceName, "channel_class", "STANDARD"),
-					resource.TestCheckResourceAttrSet(resourceName, "role_arn"),
+					resource.TestCheckResourceAttrSet(resourceName, names.AttrRoleARN),
 					resource.TestCheckResourceAttr(resourceName, "input_specification.0.codec", "AVC"),
 					resource.TestCheckResourceAttr(resourceName, "input_specification.0.input_resolution", "HD"),
 					resource.TestCheckResourceAttr(resourceName, "input_specification.0.maximum_bitrate", "MAX_20_MBPS"),
@@ -450,15 +776,15 @@ func TestAccMediaLiveChannel_update(t *testing.T) {
 						"input_attachment_name": "example-input1",
 					}),
 					resource.TestCheckTypeSetElemNestedAttrs(resourceName, "destinations.*", map[string]string{
-						"id": "destination1",
+						names.AttrID: "destination1",
 					}),
 					resource.TestCheckResourceAttr(resourceName, "encoder_settings.0.timecode_config.0.source", "EMBEDDED"),
 					resource.TestCheckTypeSetElemNestedAttrs(resourceName, "encoder_settings.0.audio_descriptions.*", map[string]string{
 						"audio_selector_name": "test-audio-selector",
-						"name":                "test-audio-description",
+						names.AttrName:        "test-audio-description",
 					}),
 					resource.TestCheckTypeSetElemNestedAttrs(resourceName, "encoder_settings.0.video_descriptions.*", map[string]string{
-						"name": "test-video-name",
+						names.AttrName: "test-video-name",
 					}),
 				),
 			},
@@ -466,10 +792,10 @@ func TestAccMediaLiveChannel_update(t *testing.T) {
 				Config: testAccChannelConfig_update(rName, rNameUpdated, "AVC", "HD"),
 				Check: resource.ComposeTestCheckFunc(
 					testAccCheckChannelExists(ctx, resourceName, &channel),
-					resource.TestCheckResourceAttr(resourceName, "name", rNameUpdated),
+					resource.TestCheckResourceAttr(resourceName, names.AttrName, rNameUpdated),
 					resource.TestCheckResourceAttrSet(resourceName, "channel_id"),
 					resource.TestCheckResourceAttr(resourceName, "channel_class", "STANDARD"),
-					resource.TestCheckResourceAttrSet(resourceName, "role_arn"),
+					resource.TestCheckResourceAttrSet(resourceName, names.AttrRoleARN),
 					resource.TestCheckResourceAttr(resourceName, "input_specification.0.codec", "AVC"),
 					resource.TestCheckResourceAttr(resourceName, "input_specification.0.input_resolution", "HD"),
 					resource.TestCheckResourceAttr(resourceName, "input_specification.0.maximum_bitrate", "MAX_20_MBPS"),
@@ -477,65 +803,16 @@ func TestAccMediaLiveChannel_update(t *testing.T) {
 						"input_attachment_name": "example-input1",
 					}),
 					resource.TestCheckTypeSetElemNestedAttrs(resourceName, "destinations.*", map[string]string{
-						"id": "destination1",
+						names.AttrID: "destination1",
 					}),
 					resource.TestCheckResourceAttr(resourceName, "encoder_settings.0.timecode_config.0.source", "EMBEDDED"),
 					resource.TestCheckTypeSetElemNestedAttrs(resourceName, "encoder_settings.0.audio_descriptions.*", map[string]string{
 						"audio_selector_name": "test-audio-selector",
-						"name":                "test-audio-description",
+						names.AttrName:        "test-audio-description",
 					}),
 					resource.TestCheckTypeSetElemNestedAttrs(resourceName, "encoder_settings.0.video_descriptions.*", map[string]string{
-						"name": "test-video-name",
+						names.AttrName: "test-video-name",
 					}),
-				),
-			},
-		},
-	})
-}
-
-func TestAccMediaLiveChannel_updateTags(t *testing.T) {
-	ctx := acctest.Context(t)
-	if testing.Short() {
-		t.Skip("skipping long-running test in short mode")
-	}
-
-	var channel medialive.DescribeChannelOutput
-	rName := sdkacctest.RandomWithPrefix(acctest.ResourcePrefix)
-	resourceName := "aws_medialive_channel.test"
-
-	resource.ParallelTest(t, resource.TestCase{
-		PreCheck: func() {
-			acctest.PreCheck(ctx, t)
-			acctest.PreCheckPartitionHasService(t, names.MediaLiveEndpointID)
-			testAccChannelsPreCheck(ctx, t)
-		},
-		ErrorCheck:               acctest.ErrorCheck(t, names.MediaLiveEndpointID),
-		ProtoV5ProviderFactories: acctest.ProtoV5ProviderFactories,
-		CheckDestroy:             testAccCheckChannelDestroy(ctx),
-		Steps: []resource.TestStep{
-			{
-				Config: testAccChannelConfig_tags1(rName, "key1", "value1"),
-				Check: resource.ComposeTestCheckFunc(
-					testAccCheckChannelExists(ctx, resourceName, &channel),
-					resource.TestCheckResourceAttr(resourceName, "tags.%", "1"),
-					resource.TestCheckResourceAttr(resourceName, "tags.key1", "value1"),
-				),
-			},
-			{
-				Config: testAccChannelConfig_tags2(rName, "key1", "value1", "key2", "value2"),
-				Check: resource.ComposeTestCheckFunc(
-					testAccCheckChannelExists(ctx, resourceName, &channel),
-					resource.TestCheckResourceAttr(resourceName, "tags.%", "2"),
-					resource.TestCheckResourceAttr(resourceName, "tags.key1", "value1"),
-					resource.TestCheckResourceAttr(resourceName, "tags.key2", "value2"),
-				),
-			},
-			{
-				Config: testAccChannelConfig_tags1(rName, "key2", "value2"),
-				Check: resource.ComposeTestCheckFunc(
-					testAccCheckChannelExists(ctx, resourceName, &channel),
-					resource.TestCheckResourceAttr(resourceName, "tags.%", "1"),
-					resource.TestCheckResourceAttr(resourceName, "tags.key2", "value2"),
 				),
 			},
 		},
@@ -558,7 +835,7 @@ func TestAccMediaLiveChannel_disappears(t *testing.T) {
 			acctest.PreCheckPartitionHasService(t, names.MediaLiveEndpointID)
 			testAccChannelsPreCheck(ctx, t)
 		},
-		ErrorCheck:               acctest.ErrorCheck(t, names.MediaLiveEndpointID),
+		ErrorCheck:               acctest.ErrorCheck(t, names.MediaLiveServiceID),
 		ProtoV5ProviderFactories: acctest.ProtoV5ProviderFactories,
 		CheckDestroy:             testAccCheckChannelDestroy(ctx),
 		Steps: []resource.TestStep{
@@ -576,7 +853,7 @@ func TestAccMediaLiveChannel_disappears(t *testing.T) {
 
 func testAccCheckChannelDestroy(ctx context.Context) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
-		conn := acctest.Provider.Meta().(*conns.AWSClient).MediaLiveClient()
+		conn := acctest.Provider.Meta().(*conns.AWSClient).MediaLiveClient(ctx)
 
 		for _, rs := range s.RootModule().Resources {
 			if rs.Type != "aws_medialive_channel" {
@@ -609,7 +886,7 @@ func testAccCheckChannelExists(ctx context.Context, name string, channel *medial
 			return create.Error(names.MediaLive, create.ErrActionCheckingExistence, tfmedialive.ResNameChannel, name, errors.New("not set"))
 		}
 
-		conn := acctest.Provider.Meta().(*conns.AWSClient).MediaLiveClient()
+		conn := acctest.Provider.Meta().(*conns.AWSClient).MediaLiveClient(ctx)
 
 		resp, err := tfmedialive.FindChannelByID(ctx, conn, rs.Primary.ID)
 
@@ -634,7 +911,7 @@ func testAccCheckChannelStatus(ctx context.Context, name string, state types.Cha
 			return create.Error(names.MediaLive, create.ErrActionChecking, tfmedialive.ResNameChannel, name, errors.New("not set"))
 		}
 
-		conn := acctest.Provider.Meta().(*conns.AWSClient).MediaLiveClient()
+		conn := acctest.Provider.Meta().(*conns.AWSClient).MediaLiveClient(ctx)
 
 		resp, err := tfmedialive.FindChannelByID(ctx, conn, rs.Primary.ID)
 
@@ -651,7 +928,7 @@ func testAccCheckChannelStatus(ctx context.Context, name string, state types.Cha
 }
 
 func testAccChannelsPreCheck(ctx context.Context, t *testing.T) {
-	conn := acctest.Provider.Meta().(*conns.AWSClient).MediaLiveClient()
+	conn := acctest.Provider.Meta().(*conns.AWSClient).MediaLiveClient(ctx)
 
 	input := &medialive.ListChannelsInput{}
 	_, err := conn.ListChannels(ctx, input)
@@ -665,7 +942,7 @@ func testAccChannelsPreCheck(ctx context.Context, t *testing.T) {
 	}
 }
 
-func testAccChannelBaseConfig(rName string) string {
+func testAccChannelConfig_base(rName string) string {
 	return fmt.Sprintf(`
 resource "aws_iam_role" "test" {
   name = %[1]q
@@ -713,29 +990,19 @@ resource "aws_iam_role_policy" "test" {
 `, rName)
 }
 
-func testAccChannelBaseS3Config(rName string) string {
+func testAccChannelConfig_baseS3(rName string) string {
 	return fmt.Sprintf(`
 resource "aws_s3_bucket" "test1" {
   bucket = "%[1]s-1"
 }
 
-resource "aws_s3_bucket_acl" "test1" {
-  bucket = aws_s3_bucket.test1.id
-  acl    = "private"
-}
-
 resource "aws_s3_bucket" "test2" {
   bucket = "%[1]s-2"
-}
-
-resource "aws_s3_bucket_acl" "test2" {
-  bucket = aws_s3_bucket.test2.id
-  acl    = "private"
 }
 `, rName)
 }
 
-func testAccChannelBaseMultiplexConfig(rName string) string {
+func testAccChannelConfig_baseMultiplex(rName string) string {
 	return fmt.Sprintf(`
 resource "aws_medialive_input_security_group" "test" {
   whitelist_rules {
@@ -757,15 +1024,14 @@ resource "aws_medialive_input" "test" {
   }
 }
 
-
 `, rName)
 }
 
 func testAccChannelConfig_basic(rName string) string {
 	return acctest.ConfigCompose(
-		testAccChannelBaseConfig(rName),
-		testAccChannelBaseS3Config(rName),
-		testAccChannelBaseMultiplexConfig(rName),
+		testAccChannelConfig_base(rName),
+		testAccChannelConfig_baseS3(rName),
+		testAccChannelConfig_baseMultiplex(rName),
 		fmt.Sprintf(`
 resource "aws_medialive_channel" "test" {
   name          = %[1]q
@@ -844,8 +1110,8 @@ resource "aws_medialive_channel" "test" {
 
 func testAccChannelConfig_udpOutputSettings(rName string) string {
 	return acctest.ConfigCompose(
-		testAccChannelBaseConfig(rName),
-		testAccChannelBaseMultiplexConfig(rName),
+		testAccChannelConfig_base(rName),
+		testAccChannelConfig_baseMultiplex(rName),
 		fmt.Sprintf(`
 resource "aws_medialive_channel" "test" {
   name          = %[1]q
@@ -930,8 +1196,8 @@ resource "aws_medialive_channel" "test" {
 
 func testAccChannelConfig_msSmoothOutputSettings(rName string) string {
 	return acctest.ConfigCompose(
-		testAccChannelBaseConfig(rName),
-		testAccChannelBaseMultiplexConfig(rName),
+		testAccChannelConfig_base(rName),
+		testAccChannelConfig_baseMultiplex(rName),
 		fmt.Sprintf(`
 resource "aws_medialive_channel" "test" {
   name          = %[1]q
@@ -1003,9 +1269,9 @@ resource "aws_medialive_channel" "test" {
 
 func testAccChannelConfig_m2tsSettings(rName string) string {
 	return acctest.ConfigCompose(
-		testAccChannelBaseConfig(rName),
-		testAccChannelBaseS3Config(rName),
-		testAccChannelBaseMultiplexConfig(rName),
+		testAccChannelConfig_base(rName),
+		testAccChannelConfig_baseS3(rName),
+		testAccChannelConfig_baseMultiplex(rName),
 		fmt.Sprintf(`
 resource "aws_medialive_channel" "test" {
   name          = %[1]q
@@ -1076,11 +1342,14 @@ resource "aws_medialive_channel" "test" {
                 audio_buffer_model        = "ATSC"
                 buffer_model              = "MULTIPLEX"
                 rate_mode                 = "CBR"
-                audio_pids                = "200"
-                dvb_sub_pids              = "300"
-                arib_captions_pid         = "100"
+                audio_pids                = 200
+                dvb_sub_pids              = 300
+                arib_captions_pid         = 100
                 arib_captions_pid_control = "AUTO"
-                video_pid                 = "101"
+                video_pid                 = 101
+                fragment_time             = 1.92
+                program_num               = 1
+                segmentation_time         = 1.92
               }
             }
           }
@@ -1094,9 +1363,9 @@ resource "aws_medialive_channel" "test" {
 
 func testAccChannelConfig_audioDescriptionCodecSettings(rName string) string {
 	return acctest.ConfigCompose(
-		testAccChannelBaseConfig(rName),
-		testAccChannelBaseS3Config(rName),
-		testAccChannelBaseMultiplexConfig(rName),
+		testAccChannelConfig_base(rName),
+		testAccChannelConfig_baseS3(rName),
+		testAccChannelConfig_baseMultiplex(rName),
 		fmt.Sprintf(`
 resource "aws_medialive_channel" "test" {
   name          = %[1]q
@@ -1191,11 +1460,293 @@ resource "aws_medialive_channel" "test" {
 `, rName))
 }
 
+func testAccChannelConfig_videoDescriptionCodecSettingsH264Settings(rName string) string {
+	return acctest.ConfigCompose(
+		testAccChannelConfig_base(rName),
+		testAccChannelConfig_baseS3(rName),
+		testAccChannelConfig_baseMultiplex(rName),
+		fmt.Sprintf(`
+resource "aws_medialive_channel" "test" {
+  name          = %[1]q
+  channel_class = "STANDARD"
+  role_arn      = aws_iam_role.test.arn
+
+  input_specification {
+    codec            = "AVC"
+    input_resolution = "HD"
+    maximum_bitrate  = "MAX_20_MBPS"
+  }
+
+  input_attachments {
+    input_attachment_name = "example-input1"
+    input_id              = aws_medialive_input.test.id
+  }
+
+  destinations {
+    id = %[1]q
+
+    settings {
+      url = "s3://${aws_s3_bucket.test1.id}/test1"
+    }
+
+    settings {
+      url = "s3://${aws_s3_bucket.test2.id}/test2"
+    }
+  }
+
+  encoder_settings {
+    timecode_config {
+      source = "EMBEDDED"
+    }
+
+    audio_descriptions {
+      audio_selector_name = %[1]q
+      name                = %[1]q
+      codec_settings {
+        aac_settings {
+          rate_control_mode = "CBR"
+        }
+      }
+    }
+
+    video_descriptions {
+      name             = "test-video-name"
+      respond_to_afd   = "NONE"
+      sharpness        = 100
+      scaling_behavior = "DEFAULT"
+      width            = 1280
+      height           = 720
+      codec_settings {
+        h264_settings {
+          afd_signaling           = "NONE"
+          color_metadata          = "IGNORE"
+          adaptive_quantization   = "LOW"
+          bitrate                 = "5400000"
+          buf_size                = "10800000"
+          buf_fill_pct            = 90
+          entropy_encoding        = "CABAC"
+          flicker_aq              = "ENABLED"
+          force_field_pictures    = "DISABLED"
+          framerate_control       = "SPECIFIED"
+          framerate_numerator     = 50
+          framerate_denominator   = 1
+          gop_b_reference         = "DISABLED"
+          gop_closed_cadence      = 1
+          gop_num_b_frames        = 1
+          gop_size                = 1.92
+          gop_size_units          = "SECONDS"
+          subgop_length           = "FIXED"
+          scan_type               = "PROGRESSIVE"
+          level                   = "H264_LEVEL_AUTO"
+          look_ahead_rate_control = "HIGH"
+          num_ref_frames          = 3
+          par_control             = "INITIALIZE_FROM_SOURCE"
+          profile                 = "HIGH"
+          rate_control_mode       = "CBR"
+          syntax                  = "DEFAULT"
+          scene_change_detect     = "ENABLED"
+          slices                  = 1
+          spatial_aq              = "ENABLED"
+          temporal_aq             = "ENABLED"
+          timecode_insertion      = "PIC_TIMING_SEI"
+        }
+      }
+    }
+
+    output_groups {
+      output_group_settings {
+        archive_group_settings {
+          destination {
+            destination_ref_id = %[1]q
+          }
+        }
+      }
+
+      outputs {
+        output_name             = "test-output-name"
+        video_description_name  = "test-video-name"
+        audio_description_names = [%[1]q]
+        output_settings {
+          archive_output_settings {
+            name_modifier = "_1"
+            extension     = "m2ts"
+            container_settings {
+              m2ts_settings {
+                audio_buffer_model = "ATSC"
+                buffer_model       = "MULTIPLEX"
+                rate_mode          = "CBR"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+`, rName))
+}
+
+func testAccChannelConfig_videoDescriptionCodecSettingsH265Settings(rName string) string {
+	return acctest.ConfigCompose(
+		testAccChannelConfig_base(rName),
+		testAccChannelConfig_baseS3(rName),
+		testAccChannelConfig_baseMultiplex(rName),
+		fmt.Sprintf(`
+resource "aws_medialive_channel" "test" {
+  name          = %[1]q
+  channel_class = "STANDARD"
+  role_arn      = aws_iam_role.test.arn
+
+  input_specification {
+    codec            = "AVC"
+    input_resolution = "HD"
+    maximum_bitrate  = "MAX_20_MBPS"
+  }
+
+  input_attachments {
+    input_attachment_name = "example-input1"
+    input_id              = aws_medialive_input.test.id
+  }
+
+  destinations {
+    id = %[1]q
+
+    settings {
+      url = "s3://${aws_s3_bucket.test1.id}/test1"
+    }
+
+    settings {
+      url = "s3://${aws_s3_bucket.test2.id}/test2"
+    }
+  }
+
+  encoder_settings {
+    timecode_config {
+      source = "EMBEDDED"
+    }
+
+    audio_descriptions {
+      audio_selector_name = %[1]q
+      name                = %[1]q
+      codec_settings {
+        aac_settings {
+          rate_control_mode = "CBR"
+        }
+      }
+    }
+
+    video_descriptions {
+      name             = "test-video-name"
+      respond_to_afd   = "NONE"
+      sharpness        = 100
+      scaling_behavior = "DEFAULT"
+      width            = 1280
+      height           = 720
+      codec_settings {
+        h265_settings {
+          bitrate  = "5400000"
+          buf_size = "20000000"
+
+          framerate_numerator   = 50
+          framerate_denominator = 1
+
+          color_metadata        = "IGNORE"
+          adaptive_quantization = "LOW"
+
+          flicker_aq = "ENABLED"
+
+          afd_signaling = "FIXED"
+          fixed_afd     = "AFD_0000"
+
+          gop_closed_cadence         = 1
+          gop_size                   = 1.92
+          gop_size_units             = "SECONDS"
+          min_i_interval             = 6
+          min_qp                     = 0
+          mv_over_picture_boundaries = "ENABLED"
+          mv_temporal_predictor      = "ENABLED"
+          scan_type                  = "PROGRESSIVE"
+
+          level                   = "H265_LEVEL_AUTO"
+          look_ahead_rate_control = "HIGH"
+          profile                 = "MAIN_10BIT"
+
+          rate_control_mode   = "CBR"
+          scene_change_detect = "ENABLED"
+
+          slices = 2
+          tier   = "HIGH"
+
+          tile_height  = 64
+          tile_padding = "PADDED"
+          tile_width   = 256
+
+
+          timecode_insertion = "DISABLED"
+
+          color_space_settings {
+            hdr10_settings {
+              max_cll  = 16
+              max_fall = 16
+            }
+          }
+
+          filter_settings {
+            temporal_filter_settings {
+              post_filter_sharpening = "AUTO"
+              strength               = "STRENGTH_1"
+            }
+          }
+
+          timecode_burnin_settings {
+            timecode_burnin_font_size = "SMALL_16"
+            timecode_burnin_position  = "BOTTOM_CENTER"
+            prefix                    = "terraform-test"
+          }
+
+          treeblock_size = "AUTO"
+        }
+      }
+    }
+
+    output_groups {
+      output_group_settings {
+        archive_group_settings {
+          destination {
+            destination_ref_id = %[1]q
+          }
+        }
+      }
+
+      outputs {
+        output_name             = %[1]q
+        video_description_name  = "test-video-name"
+        audio_description_names = [%[1]q]
+        output_settings {
+          archive_output_settings {
+            name_modifier = "_1"
+            extension     = "m2ts"
+            container_settings {
+              m2ts_settings {
+                audio_buffer_model = "ATSC"
+                buffer_model       = "MULTIPLEX"
+                rate_mode          = "CBR"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+`, rName))
+}
+
 func testAccChannelConfig_hls(rName string) string {
 	return acctest.ConfigCompose(
-		testAccChannelBaseConfig(rName),
-		testAccChannelBaseS3Config(rName),
-		testAccChannelBaseMultiplexConfig(rName),
+		testAccChannelConfig_base(rName),
+		testAccChannelConfig_baseS3(rName),
+		testAccChannelConfig_baseMultiplex(rName),
 		fmt.Sprintf(`
 resource "aws_medialive_channel" "test" {
   name          = %[1]q
@@ -1245,6 +1796,7 @@ resource "aws_medialive_channel" "test" {
           destination {
             destination_ref_id = %[1]q
           }
+          client_cache = "ENABLED"
         }
       }
 
@@ -1272,11 +1824,208 @@ resource "aws_medialive_channel" "test" {
 `, rName))
 }
 
+func testAccChannelConfig_noAudio(rName string) string {
+	return acctest.ConfigCompose(
+		testAccChannelConfig_base(rName),
+		testAccChannelConfig_baseS3(rName),
+		testAccChannelConfig_baseMultiplex(rName),
+		fmt.Sprintf(`
+resource "aws_medialive_channel" "test" {
+  name          = %[1]q
+  channel_class = "STANDARD"
+  role_arn      = aws_iam_role.test.arn
+
+  input_specification {
+    codec            = "AVC"
+    input_resolution = "HD"
+    maximum_bitrate  = "MAX_20_MBPS"
+  }
+
+  input_attachments {
+    input_attachment_name = "example-input1"
+    input_id              = aws_medialive_input.test.id
+  }
+
+  destinations {
+    id = %[1]q
+
+    settings {
+      url = "s3://${aws_s3_bucket.test1.id}/test1"
+    }
+
+    settings {
+      url = "s3://${aws_s3_bucket.test2.id}/test2"
+    }
+  }
+
+  encoder_settings {
+    timecode_config {
+      source = "EMBEDDED"
+    }
+
+    video_descriptions {
+      name = "test-video-name"
+    }
+
+    output_groups {
+      output_group_settings {
+        archive_group_settings {
+          destination {
+            destination_ref_id = %[1]q
+          }
+        }
+      }
+
+      outputs {
+        output_name            = "test-output-name"
+        video_description_name = "test-video-name"
+        output_settings {
+          archive_output_settings {
+            name_modifier = "_1"
+            extension     = "m2ts"
+            container_settings {
+              m2ts_settings {
+                audio_buffer_model = "ATSC"
+                buffer_model       = "MULTIPLEX"
+                rate_mode          = "CBR"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+`, rName))
+}
+
+func testAccChannelConfig_caption_descriptions(rName string, fontResolution int) string {
+	return acctest.ConfigCompose(
+		testAccChannelConfig_base(rName),
+		testAccChannelConfig_baseS3(rName),
+		testAccChannelConfig_baseMultiplex(rName),
+		fmt.Sprintf(`
+resource "aws_medialive_channel" "test" {
+  name          = %[1]q
+  channel_class = "STANDARD"
+  role_arn      = aws_iam_role.test.arn
+
+  input_specification {
+    codec            = "AVC"
+    input_resolution = "HD"
+    maximum_bitrate  = "MAX_20_MBPS"
+  }
+
+  input_attachments {
+    input_attachment_name = "example-input1"
+    input_id              = aws_medialive_input.test.id
+
+    input_settings {
+      caption_selector {
+        name = %[1]q
+      }
+
+      caption_selector {
+        name = "test-caption-selector-teletext"
+        selector_settings {
+          teletext_source_settings {
+            page_number = "100"
+          }
+        }
+      }
+
+      audio_selector {
+        name = "test-audio-selector"
+      }
+    }
+  }
+
+  destinations {
+    id = %[1]q
+
+    settings {
+      url = "s3://${aws_s3_bucket.test1.id}/test1"
+    }
+
+    settings {
+      url = "s3://${aws_s3_bucket.test2.id}/test2"
+    }
+  }
+
+  encoder_settings {
+    timecode_config {
+      source = "EMBEDDED"
+    }
+
+    audio_descriptions {
+      name                = "test-audio-name"
+      audio_selector_name = "test-audio-selector"
+    }
+
+
+    video_descriptions {
+      name = "test-video-name"
+    }
+
+    caption_descriptions {
+      name                  = "test-caption-name"
+      caption_selector_name = aws_medialive_input.test.name
+
+      destination_settings {
+        dvb_sub_destination_settings {
+          font_resolution = %[2]d
+        }
+      }
+    }
+
+    caption_descriptions {
+      name                  = "test-caption-name-teletext"
+      caption_selector_name = "test-caption-selector-teletext"
+
+      destination_settings {
+        teletext_destination_settings {}
+      }
+    }
+
+    output_groups {
+      output_group_settings {
+        archive_group_settings {
+          destination {
+            destination_ref_id = %[1]q
+          }
+        }
+      }
+
+      outputs {
+        output_name               = "test-output-name"
+        video_description_name    = "test-video-name"
+        audio_description_names   = ["test-audio-name"]
+        caption_description_names = ["test-caption-name", "test-caption-name-teletext"]
+        output_settings {
+          archive_output_settings {
+            name_modifier = "_1"
+            extension     = "m2ts"
+            container_settings {
+              m2ts_settings {
+                audio_buffer_model = "ATSC"
+                buffer_model       = "MULTIPLEX"
+                rate_mode          = "CBR"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+`, rName, fontResolution))
+}
+
 func testAccChannelConfig_start(rName string, start bool) string {
 	return acctest.ConfigCompose(
-		testAccChannelBaseConfig(rName),
-		testAccChannelBaseS3Config(rName),
-		testAccChannelBaseMultiplexConfig(rName),
+		testAccChannelConfig_base(rName),
+		testAccChannelConfig_baseS3(rName),
+		testAccChannelConfig_baseMultiplex(rName),
 		fmt.Sprintf(`
 resource "aws_medialive_channel" "test" {
   name          = %[1]q
@@ -1356,9 +2105,9 @@ resource "aws_medialive_channel" "test" {
 
 func testAccChannelConfig_update(rName, rNameUpdated, codec, inputResolution string) string {
 	return acctest.ConfigCompose(
-		testAccChannelBaseConfig(rName),
-		testAccChannelBaseS3Config(rName),
-		testAccChannelBaseMultiplexConfig(rName),
+		testAccChannelConfig_base(rName),
+		testAccChannelConfig_baseS3(rName),
+		testAccChannelConfig_baseMultiplex(rName),
 		fmt.Sprintf(`
 resource "aws_medialive_channel" "test" {
   name          = %[2]q
@@ -1433,175 +2182,4 @@ resource "aws_medialive_channel" "test" {
   }
 }
 `, rName, rNameUpdated, codec, inputResolution))
-}
-
-func testAccChannelConfig_tags1(rName, key1, value1 string) string {
-	return acctest.ConfigCompose(
-		testAccChannelBaseConfig(rName),
-		testAccChannelBaseS3Config(rName),
-		testAccChannelBaseMultiplexConfig(rName),
-		fmt.Sprintf(`
-resource "aws_medialive_channel" "test" {
-  name          = %[1]q
-  channel_class = "STANDARD"
-  role_arn      = aws_iam_role.test.arn
-
-  input_specification {
-    codec            = "AVC"
-    input_resolution = "HD"
-    maximum_bitrate  = "MAX_20_MBPS"
-  }
-
-  input_attachments {
-    input_attachment_name = "example-input1"
-    input_id              = aws_medialive_input.test.id
-  }
-
-  destinations {
-    id = %[1]q
-
-    settings {
-      url = "s3://${aws_s3_bucket.test1.id}/test1"
-    }
-
-    settings {
-      url = "s3://${aws_s3_bucket.test2.id}/test2"
-    }
-  }
-
-  encoder_settings {
-    timecode_config {
-      source = "EMBEDDED"
-    }
-
-    audio_descriptions {
-      audio_selector_name = %[1]q
-      name                = %[1]q
-    }
-
-    video_descriptions {
-      name = "test-video-name"
-    }
-
-    output_groups {
-      output_group_settings {
-        archive_group_settings {
-          destination {
-            destination_ref_id = %[1]q
-          }
-        }
-      }
-
-      outputs {
-        output_name             = "test-output-name"
-        video_description_name  = "test-video-name"
-        audio_description_names = [%[1]q]
-        output_settings {
-          archive_output_settings {
-            name_modifier = "_1"
-            extension     = "m2ts"
-            container_settings {
-              m2ts_settings {
-                audio_buffer_model = "ATSC"
-                buffer_model       = "MULTIPLEX"
-                rate_mode          = "CBR"
-              }
-            }
-          }
-        }
-      }
-    }
-  }
-
-  tags = {
-    %[2]q = %[3]q
-  }
-}
-`, rName, key1, value1))
-}
-
-func testAccChannelConfig_tags2(rName, key1, value1, key2, value2 string) string {
-	return acctest.ConfigCompose(
-		testAccChannelBaseConfig(rName),
-		testAccChannelBaseS3Config(rName),
-		testAccChannelBaseMultiplexConfig(rName),
-		fmt.Sprintf(`
-resource "aws_medialive_channel" "test" {
-  name          = %[1]q
-  channel_class = "STANDARD"
-  role_arn      = aws_iam_role.test.arn
-
-  input_specification {
-    codec            = "AVC"
-    input_resolution = "HD"
-    maximum_bitrate  = "MAX_20_MBPS"
-  }
-
-  input_attachments {
-    input_attachment_name = "example-input1"
-    input_id              = aws_medialive_input.test.id
-  }
-
-  destinations {
-    id = %[1]q
-
-    settings {
-      url = "s3://${aws_s3_bucket.test1.id}/test1"
-    }
-
-    settings {
-      url = "s3://${aws_s3_bucket.test2.id}/test2"
-    }
-  }
-
-  encoder_settings {
-    timecode_config {
-      source = "EMBEDDED"
-    }
-
-    audio_descriptions {
-      audio_selector_name = %[1]q
-      name                = %[1]q
-    }
-
-    video_descriptions {
-      name = "test-video-name"
-    }
-
-    output_groups {
-      output_group_settings {
-        archive_group_settings {
-          destination {
-            destination_ref_id = %[1]q
-          }
-        }
-      }
-
-      outputs {
-        output_name             = "test-output-name"
-        video_description_name  = "test-video-name"
-        audio_description_names = [%[1]q]
-        output_settings {
-          archive_output_settings {
-            name_modifier = "_1"
-            extension     = "m2ts"
-            container_settings {
-              m2ts_settings {
-                audio_buffer_model = "ATSC"
-                buffer_model       = "MULTIPLEX"
-                rate_mode          = "CBR"
-              }
-            }
-          }
-        }
-      }
-    }
-  }
-
-  tags = {
-    %[2]q = %[3]q
-    %[4]q = %[5]q
-  }
-}
-`, rName, key1, value1, key2, value2))
 }
