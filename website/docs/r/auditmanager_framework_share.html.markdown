@@ -16,7 +16,7 @@ Terraform resource for managing an AWS Audit Manager Framework Share.
 
 ```terraform
 resource "aws_auditmanager_framework_share" "example" {
-  destination_account = "012345678901"
+  destination_account = "123456789012"
   destination_region  = "us-east-1"
   framework_id        = aws_auditmanager_framework.example.id
 }
@@ -34,17 +34,26 @@ The following arguments are optional:
 
 * `comment` - (Optional) Comment from the sender about the share request.
 
-## Attributes Reference
+## Attribute Reference
 
-In addition to all arguments above, the following attributes are exported:
+This resource exports the following attributes in addition to the arguments above:
 
 * `id` - Unique identifier for the share request.
 * `status` -  Status of the share request.
 
 ## Import
 
-Audit Manager Framework Share can be imported using the `id`, e.g.,
+In Terraform v1.5.0 and later, use an [`import` block](https://developer.hashicorp.com/terraform/language/import) to import Audit Manager Framework Share using the `id`. For example:
 
+```terraform
+import {
+  to = aws_auditmanager_framework_share.example
+  id = "abcdef-123456"
+}
 ```
-$ terraform import aws_auditmanager_framework_share.example abcdef-123456
+
+Using `terraform import`, import Audit Manager Framework Share using the `id`. For example:
+
+```console
+% terraform import aws_auditmanager_framework_share.example abcdef-123456
 ```

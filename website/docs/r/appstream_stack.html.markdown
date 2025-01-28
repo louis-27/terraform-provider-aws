@@ -25,6 +25,10 @@ resource "aws_appstream_stack" "example" {
   }
 
   user_settings {
+    action     = "AUTO_TIME_ZONE_REDIRECTION"
+    permission = "DISABLED"
+  }
+  user_settings {
     action     = "CLIPBOARD_COPY_FROM_LOCAL_DEVICE"
     permission = "ENABLED"
   }
@@ -85,6 +89,8 @@ The following arguments are optional:
   See [`storage_connectors`](#storage_connectors) below.
 * `user_settings` - (Optional) Configuration block for the actions that are enabled or disabled for users during their streaming sessions. If not provided, these settings are configured automatically by AWS. If provided, the terraform configuration should include a block for each configurable action.
   See [`user_settings`](#user_settings) below.
+* `streaming_experience_settings` - (Optional) The streaming protocol you want your stack to prefer. This can be UDP or TCP. Currently, UDP is only supported in the Windows native client.
+  See [`streaming_experience_settings`](#streaming_experience_settings) below.
 * `tags` - (Optional) Key-value mapping of resource tags. If configured with a provider [`default_tags` configuration block](https://registry.terraform.io/providers/hashicorp/aws/latest/docs#default_tags-configuration-block) present, tags with matching keys will overwrite those defined at the provider-level.
 
 ### `access_endpoints`
@@ -110,13 +116,18 @@ The following arguments are optional:
 ### `user_settings`
 
 * `action` - (Required) Action that is enabled or disabled.
-  Valid values are `CLIPBOARD_COPY_FROM_LOCAL_DEVICE`,  `CLIPBOARD_COPY_TO_LOCAL_DEVICE`, `FILE_UPLOAD`, `FILE_DOWNLOAD`, `PRINTING_TO_LOCAL_DEVICE`, `DOMAIN_PASSWORD_SIGNIN`, or `DOMAIN_SMART_CARD_SIGNIN`.
+  Valid values are `AUTO_TIME_ZONE_REDIRECTION`, `CLIPBOARD_COPY_FROM_LOCAL_DEVICE`, `CLIPBOARD_COPY_TO_LOCAL_DEVICE`, `DOMAIN_PASSWORD_SIGNIN`, `DOMAIN_SMART_CARD_SIGNIN`, `FILE_UPLOAD`, `FILE_DOWNLOAD`, or `PRINTING_TO_LOCAL_DEVICE`.
 * `permission` - (Required) Whether the action is enabled or disabled.
   Valid values are `ENABLED` or `DISABLED`.
 
-## Attributes Reference
+### `streaming_experience_settings`
 
-In addition to all arguments above, the following attributes are exported:
+* `preferred_protocol` - (Optional) The preferred protocol that you want to use while streaming your application.
+  Valid values are `TCP` and `UDP`.
+
+## Attribute Reference
+
+This resource exports the following attributes in addition to the arguments above:
 
 * `arn` - ARN of the appstream stack.
 * `created_time` - Date and time, in UTC and extended RFC 3339 format, when the stack was created.
@@ -124,8 +135,17 @@ In addition to all arguments above, the following attributes are exported:
 
 ## Import
 
-`aws_appstream_stack` can be imported using the id, e.g.,
+In Terraform v1.5.0 and later, use an [`import` block](https://developer.hashicorp.com/terraform/language/import) to import `aws_appstream_stack` using the id. For example:
 
+```terraform
+import {
+  to = aws_appstream_stack.example
+  id = "stackID"
+}
 ```
-$ terraform import aws_appstream_stack.example stackID
+
+Using `terraform import`, import `aws_appstream_stack` using the id. For example:
+
+```console
+% terraform import aws_appstream_stack.example stackID
 ```

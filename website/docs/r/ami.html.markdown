@@ -38,7 +38,7 @@ resource "aws_ami" "example" {
 
 ## Argument Reference
 
-The following arguments are supported:
+This resource supports the following arguments:
 
 * `name` - (Required) Region-unique name for the AMI.
 * `boot_mode` - (Optional) Boot mode of the AMI. For more information, see [Boot modes](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ami-boot.html) in the Amazon Elastic Compute Cloud User Guide.
@@ -57,6 +57,7 @@ The following arguments are supported:
 * `tags` - (Optional) Map of tags to assign to the resource. If configured with a provider [`default_tags` configuration block](https://registry.terraform.io/providers/hashicorp/aws/latest/docs#default_tags-configuration-block) present, tags with matching keys will overwrite those defined at the provider-level.
 * `tpm_support` - (Optional) If the image is configured for NitroTPM support, the value is `v2.0`. For more information, see [NitroTPM](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/nitrotpm.html) in the Amazon Elastic Compute Cloud User Guide.
 * `imds_support` - (Optional) If EC2 instances started from this image should require the use of the Instance Metadata Service V2 (IMDSv2), set this argument to `v2.0`. For more information, see [Configure instance metadata options for new instances](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/configuring-IMDS-new-instances.html#configure-IMDS-new-instances-ami-configuration).
+* `uefi_data` - (Optional) Base64 representation of the non-volatile UEFI variable store.
 
 When `virtualization_type` is "paravirtual" the following additional arguments apply:
 
@@ -98,9 +99,9 @@ Nested `ephemeral_block_device` blocks have the following structure:
 * `virtual_name` - (Required) Name for the ephemeral device, of the form "ephemeralN" where
   *N* is a volume number starting from zero.
 
-## Attributes Reference
+## Attribute Reference
 
-In addition to all arguments above, the following attributes are exported:
+This resource exports the following attributes in addition to the arguments above:
 
 * `arn` - ARN of the AMI.
 * `id` - ID of the created AMI.
@@ -111,7 +112,6 @@ In addition to all arguments above, the following attributes are exported:
 * `image_owner_alias` - AWS account alias (for example, amazon, self) or the AWS account ID of the AMI owner.
 * `image_type` - Type of image.
 * `hypervisor` - Hypervisor type of the image.
-* `owner_id` - AWS account ID of the image owner.
 * `platform` - This value is set to windows for Windows AMIs; otherwise, it is blank.
 * `public` - Whether the image has public launch permissions.
 * `tags_all` - Map of tags assigned to the resource, including those inherited from the provider [`default_tags` configuration block](https://registry.terraform.io/providers/hashicorp/aws/latest/docs#default_tags-configuration-block).
@@ -126,8 +126,17 @@ In addition to all arguments above, the following attributes are exported:
 
 ## Import
 
-`aws_ami` can be imported using the ID of the AMI, e.g.,
+In Terraform v1.5.0 and later, use an [`import` block](https://developer.hashicorp.com/terraform/language/import) to import `aws_ami` using the ID of the AMI. For example:
 
+```terraform
+import {
+  to = aws_ami.example
+  id = "ami-12345678"
+}
 ```
-$ terraform import aws_ami.example ami-12345678
+
+Using `terraform import`, import `aws_ami` using the ID of the AMI. For example:
+
+```console
+% terraform import aws_ami.example ami-12345678
 ```
