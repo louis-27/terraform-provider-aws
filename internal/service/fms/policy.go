@@ -1,27 +1,38 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
 package fms
 
 import (
 	"context"
 	"log"
-	"regexp"
+	"time"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/service/fms"
-	"github.com/hashicorp/aws-sdk-go-base/v2/awsv1shim/v2/tfawserr"
+	"github.com/YakDriver/regexache"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/fms"
+	awstypes "github.com/aws/aws-sdk-go-v2/service/fms/types"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/retry"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/structure"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 	"github.com/hashicorp/terraform-provider-aws/internal/conns"
+	"github.com/hashicorp/terraform-provider-aws/internal/enum"
+	"github.com/hashicorp/terraform-provider-aws/internal/errs"
 	"github.com/hashicorp/terraform-provider-aws/internal/errs/sdkdiag"
 	"github.com/hashicorp/terraform-provider-aws/internal/flex"
 	tftags "github.com/hashicorp/terraform-provider-aws/internal/tags"
 	"github.com/hashicorp/terraform-provider-aws/internal/tfresource"
 	"github.com/hashicorp/terraform-provider-aws/internal/verify"
+	"github.com/hashicorp/terraform-provider-aws/names"
 )
 
-// @SDKResource("aws_fms_policy")
-func ResourcePolicy() *schema.Resource {
+// @SDKResource("aws_fms_policy", name="Policy")
+// @Tags(identifierAttribute="arn")
+// @Testing(serialize=true)
+// @Testing(importIgnore="delete_all_policy_resources;policy_update_token")
+func resourcePolicy() *schema.Resource {
 	return &schema.Resource{
 		CreateWithoutTimeout: resourcePolicyCreate,
 		ReadWithoutTimeout:   resourcePolicyRead,
@@ -34,160 +45,309 @@ func ResourcePolicy() *schema.Resource {
 
 		CustomizeDiff: verify.SetTagsDiff,
 
-		Schema: map[string]*schema.Schema{
-			"arn": {
-				Type:     schema.TypeString,
-				Computed: true,
-			},
-			"delete_all_policy_resources": {
-				Type:     schema.TypeBool,
-				Optional: true,
-				Default:  true,
-			},
-			"delete_unused_fm_managed_resources": {
-				Type:     schema.TypeBool,
-				Optional: true,
-				Default:  false,
-			},
-			"description": {
-				Type:     schema.TypeString,
-				Optional: true,
-			},
-			"exclude_resource_tags": {
-				Type:     schema.TypeBool,
-				Required: true,
-			},
-			"exclude_map": {
-				Type:             schema.TypeList,
-				MaxItems:         1,
-				Optional:         true,
-				DiffSuppressFunc: verify.SuppressMissingOptionalConfigurationBlock,
-				Elem: &schema.Resource{
-					Schema: map[string]*schema.Schema{
-						"account": {
-							Type:     schema.TypeSet,
-							Optional: true,
-							Elem: &schema.Schema{
-								Type: schema.TypeString,
+		SchemaFunc: func() map[string]*schema.Schema {
+			networkACLEntrySetNestedBlock := func() *schema.Schema {
+				return &schema.Schema{
+					Type:     schema.TypeSet,
+					Optional: true,
+					Elem: &schema.Resource{
+						Schema: map[string]*schema.Schema{
+							names.AttrCIDRBlock: {
+								Type:     schema.TypeString,
+								Optional: true,
+							},
+							"egress": {
+								Type:     schema.TypeBool,
+								Required: true,
+							},
+							"icmp_type_code": {
+								Type:     schema.TypeList,
+								Optional: true,
+								Elem: &schema.Resource{
+									Schema: map[string]*schema.Schema{
+										"code": {
+											Type:     schema.TypeInt,
+											Optional: true,
+										},
+										names.AttrType: {
+											Type:     schema.TypeInt,
+											Optional: true,
+										},
+									},
+								},
+							},
+							"ipv6_cidr_block": {
+								Type:     schema.TypeString,
+								Optional: true,
+							},
+							"port_range": {
+								Type:     schema.TypeList,
+								Optional: true,
+								Elem: &schema.Resource{
+									Schema: map[string]*schema.Schema{
+										"from": {
+											Type:     schema.TypeInt,
+											Optional: true,
+										},
+										"to": {
+											Type:     schema.TypeInt,
+											Optional: true,
+										},
+									},
+								},
+							},
+							names.AttrProtocol: {
+								Type:     schema.TypeString,
+								Required: true,
+							},
+							"rule_action": {
+								Type:             schema.TypeString,
+								Required:         true,
+								ValidateDiagFunc: enum.Validate[awstypes.NetworkAclRuleAction](),
 							},
 						},
-						"orgunit": {
-							Type:     schema.TypeSet,
-							Optional: true,
-							Elem: &schema.Schema{
-								Type: schema.TypeString,
+					},
+				}
+			}
+
+			return map[string]*schema.Schema{
+				names.AttrARN: {
+					Type:     schema.TypeString,
+					Computed: true,
+				},
+				"delete_all_policy_resources": {
+					Type:     schema.TypeBool,
+					Optional: true,
+					Default:  true,
+				},
+				"delete_unused_fm_managed_resources": {
+					Type:     schema.TypeBool,
+					Optional: true,
+					Default:  false,
+				},
+				names.AttrDescription: {
+					Type:     schema.TypeString,
+					Optional: true,
+				},
+				"exclude_resource_tags": {
+					Type:     schema.TypeBool,
+					Required: true,
+				},
+				"exclude_map": {
+					Type:             schema.TypeList,
+					MaxItems:         1,
+					Optional:         true,
+					DiffSuppressFunc: verify.SuppressMissingOptionalConfigurationBlock,
+					Elem: &schema.Resource{
+						Schema: map[string]*schema.Schema{
+							"account": {
+								Type:     schema.TypeSet,
+								Optional: true,
+								Elem: &schema.Schema{
+									Type: schema.TypeString,
+								},
+							},
+							"orgunit": {
+								Type:     schema.TypeSet,
+								Optional: true,
+								Elem: &schema.Schema{
+									Type: schema.TypeString,
+								},
 							},
 						},
 					},
 				},
-			},
-			"include_map": {
-				Type:             schema.TypeList,
-				MaxItems:         1,
-				Optional:         true,
-				DiffSuppressFunc: verify.SuppressMissingOptionalConfigurationBlock,
-				Elem: &schema.Resource{
-					Schema: map[string]*schema.Schema{
-						"account": {
-							Type:     schema.TypeSet,
-							Optional: true,
-							Elem: &schema.Schema{
-								Type: schema.TypeString,
+				"include_map": {
+					Type:             schema.TypeList,
+					MaxItems:         1,
+					Optional:         true,
+					DiffSuppressFunc: verify.SuppressMissingOptionalConfigurationBlock,
+					Elem: &schema.Resource{
+						Schema: map[string]*schema.Schema{
+							"account": {
+								Type:     schema.TypeSet,
+								Optional: true,
+								Elem: &schema.Schema{
+									Type: schema.TypeString,
+								},
 							},
-						},
-						"orgunit": {
-							Type:     schema.TypeSet,
-							Optional: true,
-							Elem: &schema.Schema{
-								Type: schema.TypeString,
+							"orgunit": {
+								Type:     schema.TypeSet,
+								Optional: true,
+								Elem: &schema.Schema{
+									Type: schema.TypeString,
+								},
 							},
 						},
 					},
 				},
-			},
-			"name": {
-				Type:     schema.TypeString,
-				Required: true,
-			},
-			"policy_update_token": {
-				Type:     schema.TypeString,
-				Computed: true,
-			},
-			"remediation_enabled": {
-				Type:     schema.TypeBool,
-				Optional: true,
-			},
-			"resource_tags": tftags.TagsSchema(),
-			"resource_type": {
-				Type:          schema.TypeString,
-				Optional:      true,
-				Computed:      true,
-				ValidateFunc:  validation.StringMatch(regexp.MustCompile(`^([\p{L}\p{Z}\p{N}_.:/=+\-@]*)$`), "must match a supported resource type, such as AWS::EC2::VPC, see also: https://docs.aws.amazon.com/fms/2018-01-01/APIReference/API_Policy.html"),
-				ConflictsWith: []string{"resource_type_list"},
-			},
-			"resource_type_list": {
-				Type:     schema.TypeSet,
-				Optional: true,
-				Computed: true,
-				Elem: &schema.Schema{
-					Type:         schema.TypeString,
-					ValidateFunc: validation.StringMatch(regexp.MustCompile(`^([\p{L}\p{Z}\p{N}_.:/=+\-@]*)$`), "must match a supported resource type, such as AWS::EC2::VPC, see also: https://docs.aws.amazon.com/fms/2018-01-01/APIReference/API_Policy.html"),
+				names.AttrName: {
+					Type:     schema.TypeString,
+					Required: true,
 				},
-				ConflictsWith: []string{"resource_type"},
-			},
-			"security_service_policy_data": {
-				Type:     schema.TypeList,
-				Required: true,
-				MaxItems: 1,
-				Elem: &schema.Resource{
-					Schema: map[string]*schema.Schema{
-						"managed_service_data": {
-							Type:             schema.TypeString,
-							Optional:         true,
-							DiffSuppressFunc: verify.SuppressEquivalentJSONDiffs,
-						},
-						"type": {
-							Type:     schema.TypeString,
-							Required: true,
+				"policy_update_token": {
+					Type:     schema.TypeString,
+					Computed: true,
+				},
+				"remediation_enabled": {
+					Type:     schema.TypeBool,
+					Optional: true,
+				},
+				names.AttrResourceTags: tftags.TagsSchema(),
+				names.AttrResourceType: {
+					Type:          schema.TypeString,
+					Optional:      true,
+					Computed:      true,
+					ValidateFunc:  validation.StringMatch(regexache.MustCompile(`^([\p{L}\p{Z}\p{N}_.:/=+\-@]*)$`), "must match a supported resource type, such as AWS::EC2::VPC, see also: https://docs.aws.amazon.com/fms/2018-01-01/APIReference/API_Policy.html"),
+					ConflictsWith: []string{"resource_type_list"},
+				},
+				"resource_set_ids": {
+					Type:     schema.TypeSet,
+					Optional: true,
+					Computed: true,
+					Elem: &schema.Schema{
+						Type: schema.TypeString,
+					},
+				},
+				"resource_type_list": {
+					Type:     schema.TypeSet,
+					Optional: true,
+					Computed: true,
+					Elem: &schema.Schema{
+						Type:         schema.TypeString,
+						ValidateFunc: validation.StringMatch(regexache.MustCompile(`^([\p{L}\p{Z}\p{N}_.:/=+\-@]*)$`), "must match a supported resource type, such as AWS::EC2::VPC, see also: https://docs.aws.amazon.com/fms/2018-01-01/APIReference/API_Policy.html"),
+					},
+					ConflictsWith: []string{names.AttrResourceType},
+				},
+				"security_service_policy_data": {
+					Type:     schema.TypeList,
+					Required: true,
+					MaxItems: 1,
+					Elem: &schema.Resource{
+						Schema: map[string]*schema.Schema{
+							"managed_service_data": {
+								Type:                  schema.TypeString,
+								Optional:              true,
+								ValidateFunc:          validation.StringIsJSON,
+								DiffSuppressFunc:      suppressEquivalentManagedServiceDataJSON,
+								DiffSuppressOnRefresh: true,
+								StateFunc: func(v interface{}) string {
+									json, _ := structure.NormalizeJsonString(v)
+									return json
+								},
+							},
+							"policy_option": {
+								Type:     schema.TypeList,
+								Optional: true,
+								MaxItems: 1,
+								Elem: &schema.Resource{
+									Schema: map[string]*schema.Schema{
+										"network_acl_common_policy": {
+											Type:     schema.TypeList,
+											Optional: true,
+											MaxItems: 1,
+											Elem: &schema.Resource{
+												Schema: map[string]*schema.Schema{
+													"network_acl_entry_set": {
+														Type:     schema.TypeList,
+														Optional: true,
+														MaxItems: 1,
+														Elem: &schema.Resource{
+															Schema: map[string]*schema.Schema{
+																"last_entry":  networkACLEntrySetNestedBlock(),
+																"first_entry": networkACLEntrySetNestedBlock(),
+																"force_remediate_for_first_entries": {
+																	Type:     schema.TypeBool,
+																	Required: true,
+																},
+																"force_remediate_for_last_entries": {
+																	Type:     schema.TypeBool,
+																	Required: true,
+																},
+															},
+														},
+													},
+												},
+											},
+										},
+										"network_firewall_policy": {
+											Type:     schema.TypeList,
+											Optional: true,
+											MaxItems: 1,
+											Elem: &schema.Resource{
+												Schema: map[string]*schema.Schema{
+													"firewall_deployment_model": {
+														Type:             schema.TypeString,
+														Optional:         true,
+														ValidateDiagFunc: enum.Validate[awstypes.FirewallDeploymentModel](),
+													},
+												},
+											},
+										},
+										"third_party_firewall_policy": {
+											Type:     schema.TypeList,
+											Optional: true,
+											MaxItems: 1,
+											Elem: &schema.Resource{
+												Schema: map[string]*schema.Schema{
+													"firewall_deployment_model": {
+														Type:             schema.TypeString,
+														Optional:         true,
+														ValidateDiagFunc: enum.Validate[awstypes.FirewallDeploymentModel](),
+													},
+												},
+											},
+										},
+									},
+								},
+							},
+							names.AttrType: {
+								Type:     schema.TypeString,
+								Required: true,
+							},
 						},
 					},
 				},
-			},
-			"tags":     tftags.TagsSchema(),
-			"tags_all": tftags.TagsSchemaComputed(),
+				names.AttrTags:    tftags.TagsSchema(),
+				names.AttrTagsAll: tftags.TagsSchemaComputed(),
+			}
 		},
 	}
 }
 
 func resourcePolicyCreate(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
 	var diags diag.Diagnostics
-	conn := meta.(*conns.AWSClient).FMSConn()
-	defaultTagsConfig := meta.(*conns.AWSClient).DefaultTagsConfig
-	tags := defaultTagsConfig.MergeTags(tftags.New(ctx, d.Get("tags").(map[string]interface{})))
+	conn := meta.(*conns.AWSClient).FMSClient(ctx)
 
 	input := &fms.PutPolicyInput{
-		Policy:  resourcePolicyExpandPolicy(d),
-		TagList: Tags(tags.IgnoreAWS()),
+		Policy:  expandPolicy(d),
+		TagList: getTagsIn(ctx),
 	}
 
-	output, err := conn.PutPolicyWithContext(ctx, input)
+	// System problems can arise during FMS policy updates (maybe also creation),
+	// so we set the following operation as retryable.
+	// Reference: https://github.com/hashicorp/terraform-provider-aws/issues/23946.
+	const (
+		timeout = 1 * time.Minute
+	)
+	outputRaw, err := tfresource.RetryWhenIsA[*awstypes.InternalErrorException](ctx, timeout, func() (interface{}, error) {
+		return conn.PutPolicy(ctx, input)
+	})
 
 	if err != nil {
 		return sdkdiag.AppendErrorf(diags, "creating FMS Policy: %s", err)
 	}
 
-	d.SetId(aws.StringValue(output.Policy.PolicyId))
+	d.SetId(aws.ToString(outputRaw.(*fms.PutPolicyOutput).Policy.PolicyId))
 
 	return append(diags, resourcePolicyRead(ctx, d, meta)...)
 }
 
 func resourcePolicyRead(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
 	var diags diag.Diagnostics
-	conn := meta.(*conns.AWSClient).FMSConn()
-	defaultTagsConfig := meta.(*conns.AWSClient).DefaultTagsConfig
-	ignoreTagsConfig := meta.(*conns.AWSClient).IgnoreTagsConfig
+	conn := meta.(*conns.AWSClient).FMSClient(ctx)
 
-	output, err := FindPolicyByID(ctx, conn, d.Id())
+	output, err := findPolicyByID(ctx, conn, d.Id())
 
 	if !d.IsNewResource() && tfresource.NotFound(err) {
 		log.Printf("[WARN] FMS Policy %s not found, removing from state", d.Id())
@@ -199,50 +359,34 @@ func resourcePolicyRead(ctx context.Context, d *schema.ResourceData, meta interf
 		return sdkdiag.AppendErrorf(diags, "reading FMS Policy (%s): %s", d.Id(), err)
 	}
 
-	arn := aws.StringValue(output.PolicyArn)
-	d.Set("arn", arn)
+	arn := aws.ToString(output.PolicyArn)
+	d.Set(names.AttrARN, arn)
 	policy := output.Policy
 	d.Set("delete_unused_fm_managed_resources", policy.DeleteUnusedFMManagedResources)
-	d.Set("description", policy.PolicyDescription)
+	d.Set(names.AttrDescription, policy.PolicyDescription)
 	if err := d.Set("exclude_map", flattenPolicyMap(policy.ExcludeMap)); err != nil {
-		sdkdiag.AppendErrorf(diags, "setting exclude_map: %s", err)
+		diags = sdkdiag.AppendErrorf(diags, "setting exclude_map: %s", err)
 	}
 	d.Set("exclude_resource_tags", policy.ExcludeResourceTags)
 	if err := d.Set("include_map", flattenPolicyMap(policy.IncludeMap)); err != nil {
-		sdkdiag.AppendErrorf(diags, "setting include_map: %s", err)
+		diags = sdkdiag.AppendErrorf(diags, "setting include_map: %s", err)
 	}
-	d.Set("name", policy.PolicyName)
+	d.Set(names.AttrName, policy.PolicyName)
 	d.Set("policy_update_token", policy.PolicyUpdateToken)
 	d.Set("remediation_enabled", policy.RemediationEnabled)
-	if err := d.Set("resource_tags", flattenResourceTags(policy.ResourceTags)); err != nil {
-		sdkdiag.AppendErrorf(diags, "setting resource_tags: %s", err)
+	if err := d.Set(names.AttrResourceTags, flattenResourceTags(policy.ResourceTags)); err != nil {
+		diags = sdkdiag.AppendErrorf(diags, "setting resource_tags: %s", err)
 	}
-	d.Set("resource_type", policy.ResourceType)
-	if err := d.Set("resource_type_list", policy.ResourceTypeList); err != nil {
-		sdkdiag.AppendErrorf(diags, "setting resource_type_list: %s", err)
-	}
-	securityServicePolicy := []map[string]string{{
-		"type":                 aws.StringValue(policy.SecurityServicePolicyData.Type),
-		"managed_service_data": aws.StringValue(policy.SecurityServicePolicyData.ManagedServiceData),
+	d.Set(names.AttrResourceType, policy.ResourceType)
+	d.Set("resource_type_list", policy.ResourceTypeList)
+	d.Set("resource_set_ids", policy.ResourceSetIds)
+	securityServicePolicy := []map[string]interface{}{{
+		names.AttrType:         string(policy.SecurityServicePolicyData.Type),
+		"managed_service_data": aws.ToString(policy.SecurityServicePolicyData.ManagedServiceData),
+		"policy_option":        flattenPolicyOption(policy.SecurityServicePolicyData.PolicyOption),
 	}}
 	if err := d.Set("security_service_policy_data", securityServicePolicy); err != nil {
-		sdkdiag.AppendErrorf(diags, "setting security_service_policy_data: %s", err)
-	}
-
-	tags, err := ListTags(ctx, conn, arn)
-
-	if err != nil {
-		return sdkdiag.AppendErrorf(diags, "listing tags for FMS Policy (%s): %s", d.Id(), err)
-	}
-
-	tags = tags.IgnoreAWS().IgnoreConfig(ignoreTagsConfig)
-
-	if err := d.Set("tags", tags.RemoveDefaultConfig(defaultTagsConfig).Map()); err != nil {
-		return sdkdiag.AppendErrorf(diags, "setting tags: %s", err)
-	}
-
-	if err := d.Set("tags_all", tags.Map()); err != nil {
-		return sdkdiag.AppendErrorf(diags, "setting tags_all: %s", err)
+		diags = sdkdiag.AppendErrorf(diags, "setting security_service_policy_data: %s", err)
 	}
 
 	return diags
@@ -250,25 +394,25 @@ func resourcePolicyRead(ctx context.Context, d *schema.ResourceData, meta interf
 
 func resourcePolicyUpdate(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
 	var diags diag.Diagnostics
-	conn := meta.(*conns.AWSClient).FMSConn()
+	conn := meta.(*conns.AWSClient).FMSClient(ctx)
 
-	if d.HasChangesExcept("tags", "tags_all") {
+	if d.HasChangesExcept(names.AttrTags, names.AttrTagsAll) {
 		input := &fms.PutPolicyInput{
-			Policy: resourcePolicyExpandPolicy(d),
+			Policy: expandPolicy(d),
 		}
 
-		_, err := conn.PutPolicyWithContext(ctx, input)
+		// System problems can arise during FMS policy updates (maybe also creation),
+		// so we set the following operation as retryable.
+		// Reference: https://github.com/hashicorp/terraform-provider-aws/issues/23946.
+		const (
+			timeout = 1 * time.Minute
+		)
+		_, err := tfresource.RetryWhenIsA[*awstypes.InternalErrorException](ctx, timeout, func() (interface{}, error) {
+			return conn.PutPolicy(ctx, input)
+		})
 
 		if err != nil {
 			return sdkdiag.AppendErrorf(diags, "updating FMS Policy (%s): %s", d.Id(), err)
-		}
-	}
-
-	if d.HasChange("tags_all") {
-		o, n := d.GetChange("tags_all")
-
-		if err := UpdateTags(ctx, conn, d.Get("arn").(string), o, n); err != nil {
-			return sdkdiag.AppendErrorf(diags, "updating FMS Policy (%s) tags: %s", d.Id(), err)
 		}
 	}
 
@@ -277,15 +421,15 @@ func resourcePolicyUpdate(ctx context.Context, d *schema.ResourceData, meta inte
 
 func resourcePolicyDelete(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
 	var diags diag.Diagnostics
-	conn := meta.(*conns.AWSClient).FMSConn()
+	conn := meta.(*conns.AWSClient).FMSClient(ctx)
 
 	log.Printf("[DEBUG] Deleting FMS Policy: %s", d.Id())
-	_, err := conn.DeletePolicyWithContext(ctx, &fms.DeletePolicyInput{
+	_, err := conn.DeletePolicy(ctx, &fms.DeletePolicyInput{
 		PolicyId:                 aws.String(d.Id()),
-		DeleteAllPolicyResources: aws.Bool(d.Get("delete_all_policy_resources").(bool)),
+		DeleteAllPolicyResources: d.Get("delete_all_policy_resources").(bool),
 	})
 
-	if tfawserr.ErrCodeEquals(err, fms.ErrCodeResourceNotFoundException) {
+	if errs.IsA[*awstypes.ResourceNotFoundException](err) {
 		return diags
 	}
 
@@ -296,15 +440,15 @@ func resourcePolicyDelete(ctx context.Context, d *schema.ResourceData, meta inte
 	return diags
 }
 
-func FindPolicyByID(ctx context.Context, conn *fms.FMS, id string) (*fms.GetPolicyOutput, error) {
+func findPolicyByID(ctx context.Context, conn *fms.Client, id string) (*fms.GetPolicyOutput, error) {
 	input := &fms.GetPolicyInput{
 		PolicyId: aws.String(id),
 	}
 
-	output, err := conn.GetPolicyWithContext(ctx, input)
+	output, err := conn.GetPolicy(ctx, input)
 
-	if tfawserr.ErrCodeEquals(err, fms.ErrCodeResourceNotFoundException) {
-		return nil, &resource.NotFoundError{
+	if errs.IsA[*awstypes.ResourceNotFoundException](err) {
+		return nil, &retry.NotFoundError{
 			LastError:   err,
 			LastRequest: input,
 		}
@@ -321,99 +465,405 @@ func FindPolicyByID(ctx context.Context, conn *fms.FMS, id string) (*fms.GetPoli
 	return output, nil
 }
 
-func resourcePolicyExpandPolicy(d *schema.ResourceData) *fms.Policy {
+func expandPolicy(d *schema.ResourceData) *awstypes.Policy {
 	resourceType := aws.String("ResourceTypeList")
-	resourceTypeList := flex.ExpandStringSet(d.Get("resource_type_list").(*schema.Set))
-	if t, ok := d.GetOk("resource_type"); ok {
-		resourceType = aws.String(t.(string))
+	if v, ok := d.GetOk(names.AttrResourceType); ok {
+		resourceType = aws.String(v.(string))
 	}
 
-	fmsPolicy := &fms.Policy{
-		DeleteUnusedFMManagedResources: aws.Bool(d.Get("delete_unused_fm_managed_resources").(bool)),
-		ExcludeResourceTags:            aws.Bool(d.Get("exclude_resource_tags").(bool)),
-		PolicyDescription:              aws.String(d.Get("description").(string)),
-		PolicyName:                     aws.String(d.Get("name").(string)),
-		RemediationEnabled:             aws.Bool(d.Get("remediation_enabled").(bool)),
+	apiObject := &awstypes.Policy{
+		DeleteUnusedFMManagedResources: d.Get("delete_unused_fm_managed_resources").(bool),
+		ExcludeMap:                     expandPolicyMap(d.Get("exclude_map").([]interface{})),
+		ExcludeResourceTags:            d.Get("exclude_resource_tags").(bool),
+		IncludeMap:                     expandPolicyMap(d.Get("include_map").([]interface{})),
+		PolicyDescription:              aws.String(d.Get(names.AttrDescription).(string)),
+		PolicyName:                     aws.String(d.Get(names.AttrName).(string)),
+		RemediationEnabled:             d.Get("remediation_enabled").(bool),
 		ResourceType:                   resourceType,
-		ResourceTypeList:               resourceTypeList,
+		ResourceTypeList:               flex.ExpandStringValueSet(d.Get("resource_type_list").(*schema.Set)),
+		ResourceSetIds:                 flex.ExpandStringValueSet(d.Get("resource_set_ids").(*schema.Set)),
 	}
 
 	if d.Id() != "" {
-		fmsPolicy.PolicyId = aws.String(d.Id())
-		fmsPolicy.PolicyUpdateToken = aws.String(d.Get("policy_update_token").(string))
+		apiObject.PolicyId = aws.String(d.Id())
+		apiObject.PolicyUpdateToken = aws.String(d.Get("policy_update_token").(string))
 	}
 
-	fmsPolicy.ExcludeMap = expandPolicyMap(d.Get("exclude_map").([]interface{}))
-
-	fmsPolicy.IncludeMap = expandPolicyMap(d.Get("include_map").([]interface{}))
-
-	fmsPolicy.ResourceTags = constructResourceTags(d.Get("resource_tags"))
-
-	securityServicePolicy := d.Get("security_service_policy_data").([]interface{})[0].(map[string]interface{})
-	fmsPolicy.SecurityServicePolicyData = &fms.SecurityServicePolicyData{
-		ManagedServiceData: aws.String(securityServicePolicy["managed_service_data"].(string)),
-		Type:               aws.String(securityServicePolicy["type"].(string)),
-	}
-
-	return fmsPolicy
-}
-
-func expandPolicyMap(set []interface{}) map[string][]*string {
-	fmsPolicyMap := map[string][]*string{}
-	if len(set) > 0 {
-		if _, ok := set[0].(map[string]interface{}); !ok {
-			return fmsPolicyMap
-		}
-		for key, listValue := range set[0].(map[string]interface{}) {
-			var flatKey string
-			switch key {
-			case "account":
-				flatKey = "ACCOUNT"
-			case "orgunit":
-				flatKey = "ORG_UNIT"
-			}
-
-			for _, value := range listValue.(*schema.Set).List() {
-				fmsPolicyMap[flatKey] = append(fmsPolicyMap[flatKey], aws.String(value.(string)))
-			}
+	if v, ok := d.GetOk(names.AttrResourceTags); ok && len(v.(map[string]interface{})) > 0 {
+		for k, v := range flex.ExpandStringValueMap(v.(map[string]interface{})) {
+			apiObject.ResourceTags = append(apiObject.ResourceTags, awstypes.ResourceTag{
+				Key:   aws.String(k),
+				Value: aws.String(v),
+			})
 		}
 	}
-	return fmsPolicyMap
+
+	tfMap := d.Get("security_service_policy_data").([]interface{})[0].(map[string]interface{})
+	apiObject.SecurityServicePolicyData = &awstypes.SecurityServicePolicyData{
+		ManagedServiceData: aws.String(tfMap["managed_service_data"].(string)),
+		Type:               awstypes.SecurityServiceType(tfMap[names.AttrType].(string)),
+	}
+
+	if v, ok := tfMap["policy_option"].([]interface{}); ok && len(v) > 0 && v[0] != nil {
+		apiObject.SecurityServicePolicyData.PolicyOption = expandPolicyOption(v[0].(map[string]interface{}))
+	}
+
+	return apiObject
 }
 
-func flattenPolicyMap(fmsPolicyMap map[string][]*string) []interface{} {
-	flatPolicyMap := map[string]interface{}{}
+func expandPolicyOption(tfMap map[string]interface{}) *awstypes.PolicyOption {
+	if tfMap == nil {
+		return nil
+	}
 
-	for key, value := range fmsPolicyMap {
-		switch key {
+	apiObject := &awstypes.PolicyOption{}
+
+	if v, ok := tfMap["network_acl_common_policy"].([]interface{}); ok && len(v) > 0 && v[0] != nil {
+		apiObject.NetworkAclCommonPolicy = expandNetworkACLCommonPolicy(v[0].(map[string]interface{}))
+	}
+
+	if v, ok := tfMap["network_firewall_policy"].([]interface{}); ok && len(v) > 0 && v[0] != nil {
+		apiObject.NetworkFirewallPolicy = expandNetworkFirewallPolicy(v[0].(map[string]interface{}))
+	}
+
+	if v, ok := tfMap["third_party_firewall_policy"].([]interface{}); ok && len(v) > 0 && v[0] != nil {
+		apiObject.ThirdPartyFirewallPolicy = expandThirdPartyFirewallPolicy(v[0].(map[string]interface{}))
+	}
+
+	return apiObject
+}
+
+func expandNetworkACLCommonPolicy(tfMap map[string]interface{}) *awstypes.NetworkAclCommonPolicy {
+	if tfMap == nil {
+		return nil
+	}
+
+	apiObject := &awstypes.NetworkAclCommonPolicy{}
+
+	if v, ok := tfMap["network_acl_entry_set"].([]interface{}); ok && len(v) > 0 && v[0] != nil {
+		apiObject.NetworkAclEntrySet = expandNetworkACLEntrySet(v[0].(map[string]interface{}))
+	}
+
+	return apiObject
+}
+
+func expandNetworkACLEntrySet(tfMap map[string]interface{}) *awstypes.NetworkAclEntrySet {
+	if tfMap == nil {
+		return nil
+	}
+
+	apiObject := &awstypes.NetworkAclEntrySet{}
+
+	if v, ok := tfMap["first_entry"].(*schema.Set); ok && v.Len() > 0 {
+		apiObject.FirstEntries = expandNetworkACLEntries(v.List())
+	}
+
+	if v, ok := tfMap["force_remediate_for_first_entries"].(bool); ok {
+		apiObject.ForceRemediateForFirstEntries = aws.Bool(v)
+	}
+
+	if v, ok := tfMap["force_remediate_for_last_entries"].(bool); ok {
+		apiObject.ForceRemediateForLastEntries = aws.Bool(v)
+	}
+
+	if v, ok := tfMap["last_entry"].(*schema.Set); ok && v.Len() > 0 {
+		apiObject.LastEntries = expandNetworkACLEntries(v.List())
+	}
+
+	return apiObject
+}
+
+func expandNetworkACLEntries(tfList []interface{}) []awstypes.NetworkAclEntry {
+	if len(tfList) == 0 {
+		return nil
+	}
+
+	apiObjects := []awstypes.NetworkAclEntry{}
+
+	for _, tfMapRaw := range tfList {
+		tfMap, ok := tfMapRaw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		apiObjects = append(apiObjects, expandNetworkACLEntry(tfMap))
+	}
+
+	return apiObjects
+}
+
+func expandNetworkACLEntry(tfMap map[string]interface{}) awstypes.NetworkAclEntry {
+	apiObject := awstypes.NetworkAclEntry{}
+
+	if v, ok := tfMap[names.AttrCIDRBlock].(string); ok && v != "" {
+		apiObject.CidrBlock = aws.String(v)
+	}
+
+	if v, ok := tfMap["egress"].(bool); ok {
+		apiObject.Egress = aws.Bool(v)
+	}
+
+	if v, ok := tfMap["icmp_type_code"].([]interface{}); ok && len(v) > 0 {
+		apiObject.IcmpTypeCode = expandNetworkACLIcmpTypeCode(v[0].(map[string]interface{}))
+	}
+
+	if v, ok := tfMap["ipv6_cidr_block"].(string); ok && v != "" {
+		apiObject.Ipv6CidrBlock = aws.String(v)
+	}
+
+	if v, ok := tfMap["port_range"].([]interface{}); ok && len(v) > 0 {
+		apiObject.PortRange = expandNetworkACLPortRange(v[0].(map[string]interface{}))
+	}
+
+	if v, ok := tfMap[names.AttrProtocol].(string); ok && v != "" {
+		apiObject.Protocol = aws.String(v)
+	}
+
+	if v, ok := tfMap["rule_action"].(string); ok && v != "" {
+		apiObject.RuleAction = awstypes.NetworkAclRuleAction(v)
+	}
+
+	return apiObject
+}
+
+func expandNetworkACLIcmpTypeCode(tfMap map[string]interface{}) *awstypes.NetworkAclIcmpTypeCode {
+	if tfMap == nil {
+		return nil
+	}
+
+	apiObject := &awstypes.NetworkAclIcmpTypeCode{}
+
+	apiObject.Code = aws.Int32(int32(tfMap["code"].(int)))
+	apiObject.Type = aws.Int32(int32(tfMap[names.AttrType].(int)))
+
+	return apiObject
+}
+
+func expandNetworkACLPortRange(tfMap map[string]interface{}) *awstypes.NetworkAclPortRange {
+	if tfMap == nil {
+		return nil
+	}
+
+	apiObject := &awstypes.NetworkAclPortRange{}
+
+	apiObject.From = aws.Int32(int32(tfMap["from"].(int)))
+	apiObject.To = aws.Int32(int32(tfMap["to"].(int)))
+
+	return apiObject
+}
+
+func expandNetworkFirewallPolicy(tfMap map[string]interface{}) *awstypes.NetworkFirewallPolicy {
+	if tfMap == nil {
+		return nil
+	}
+
+	apiObject := &awstypes.NetworkFirewallPolicy{}
+
+	if v, ok := tfMap["firewall_deployment_model"].(string); ok {
+		apiObject.FirewallDeploymentModel = awstypes.FirewallDeploymentModel(v)
+	}
+
+	return apiObject
+}
+
+func expandThirdPartyFirewallPolicy(tfMap map[string]interface{}) *awstypes.ThirdPartyFirewallPolicy {
+	if tfMap == nil {
+		return nil
+	}
+
+	apiObject := &awstypes.ThirdPartyFirewallPolicy{}
+
+	if v, ok := tfMap["firewall_deployment_model"].(string); ok {
+		apiObject.FirewallDeploymentModel = awstypes.FirewallDeploymentModel(v)
+	}
+
+	return apiObject
+}
+
+func expandPolicyMap(tfList []interface{}) map[string][]string {
+	if len(tfList) == 0 || tfList[0] == nil {
+		return nil
+	}
+
+	tfMap := tfList[0].(map[string]interface{})
+
+	if tfMap == nil {
+		return nil
+	}
+
+	apiObject := map[string][]string{}
+
+	for k, v := range tfMap {
+		switch v := flex.ExpandStringValueSet(v.(*schema.Set)); k {
+		case "account":
+			apiObject["ACCOUNT"] = v
+		case "orgunit":
+			apiObject["ORG_UNIT"] = v
+		}
+	}
+
+	return apiObject
+}
+
+func flattenPolicyMap(apiObject map[string][]string) []interface{} {
+	tfMap := map[string]interface{}{}
+
+	for k, v := range apiObject {
+		switch k {
 		case "ACCOUNT":
-			flatPolicyMap["account"] = value
+			tfMap["account"] = v
 		case "ORG_UNIT":
-			flatPolicyMap["orgunit"] = value
-		default:
-			log.Printf("[WARNING] Unexpected key (%q) found in FMS policy", key)
+			tfMap["orgunit"] = v
 		}
 	}
 
-	return []interface{}{flatPolicyMap}
+	return []interface{}{tfMap}
 }
 
-func flattenResourceTags(resourceTags []*fms.ResourceTag) map[string]interface{} {
-	resTags := map[string]interface{}{}
-
-	for _, v := range resourceTags {
-		resTags[*v.Key] = v.Value
+func flattenPolicyOption(apiObject *awstypes.PolicyOption) []interface{} {
+	if apiObject == nil {
+		return nil
 	}
-	return resTags
+
+	tfMap := map[string]interface{}{}
+
+	if v := apiObject.NetworkAclCommonPolicy; v != nil {
+		tfMap["network_acl_common_policy"] = flattenNetworkACLCommonPolicy(apiObject.NetworkAclCommonPolicy)
+	}
+
+	if v := apiObject.NetworkFirewallPolicy; v != nil {
+		tfMap["network_firewall_policy"] = flattenNetworkFirewallPolicy(apiObject.NetworkFirewallPolicy)
+	}
+
+	if v := apiObject.ThirdPartyFirewallPolicy; v != nil {
+		tfMap["third_party_firewall_policy"] = flattenThirdPartyFirewallPolicy(apiObject.ThirdPartyFirewallPolicy)
+	}
+
+	return []interface{}{tfMap}
 }
 
-func constructResourceTags(rTags interface{}) []*fms.ResourceTag {
-	var rTagList []*fms.ResourceTag
-
-	tags := rTags.(map[string]interface{})
-	for k, v := range tags {
-		rTagList = append(rTagList, &fms.ResourceTag{Key: aws.String(k), Value: aws.String(v.(string))})
+func flattenNetworkACLCommonPolicy(apiObject *awstypes.NetworkAclCommonPolicy) []interface{} {
+	if apiObject == nil {
+		return nil
 	}
 
-	return rTagList
+	tfMap := map[string]interface{}{}
+
+	if v := apiObject.NetworkAclEntrySet; v != nil {
+		tfMap["network_acl_entry_set"] = flattenNetworkACLEntrySet(v)
+	}
+
+	return []interface{}{tfMap}
+}
+
+func flattenNetworkACLEntrySet(apiObject *awstypes.NetworkAclEntrySet) []interface{} {
+	if apiObject == nil {
+		return nil
+	}
+
+	tfMap := map[string]interface{}{}
+
+	if v := apiObject.FirstEntries; v != nil {
+		tfMap["first_entry"] = flattenNetworkACLEntries(v)
+	}
+
+	if v := apiObject.ForceRemediateForFirstEntries; v != nil {
+		tfMap["force_remediate_for_first_entries"] = aws.ToBool(v)
+	}
+
+	if v := apiObject.ForceRemediateForLastEntries; v != nil {
+		tfMap["force_remediate_for_last_entries"] = aws.ToBool(v)
+	}
+
+	if v := apiObject.LastEntries; v != nil {
+		tfMap["last_entry"] = flattenNetworkACLEntries(v)
+	}
+
+	return []interface{}{tfMap}
+}
+
+func flattenNetworkACLEntries(apiObjects []awstypes.NetworkAclEntry) []interface{} {
+	if len(apiObjects) == 0 {
+		return nil
+	}
+
+	var tfList []interface{}
+
+	for _, networkAclEntry := range apiObjects {
+		tfList = append(tfList, flattenNetworkACLEntry(networkAclEntry))
+	}
+
+	return tfList
+}
+
+func flattenNetworkACLEntry(apiObject awstypes.NetworkAclEntry) interface{} {
+	tfMap := map[string]interface{}{}
+
+	if v := apiObject.CidrBlock; v != nil {
+		tfMap[names.AttrCIDRBlock] = aws.ToString(v)
+	}
+
+	if v := apiObject.Egress; v != nil {
+		tfMap["egress"] = aws.ToBool(v)
+	}
+
+	if v := apiObject.IcmpTypeCode; v != nil {
+		tfMap["icmp_type_code"] = []interface{}{map[string]interface{}{
+			"code":         aws.ToInt32(v.Code),
+			names.AttrType: aws.ToInt32(v.Type),
+		}}
+	}
+
+	if v := apiObject.Ipv6CidrBlock; v != nil {
+		tfMap["ipv6_cidr_block"] = v
+	}
+
+	if v := apiObject.PortRange; v != nil {
+		tfMap["port_range"] = []interface{}{map[string]interface{}{
+			"from": aws.ToInt32(v.From),
+			"to":   aws.ToInt32(v.To),
+		}}
+	}
+
+	if v := apiObject.Protocol; v != nil {
+		tfMap[names.AttrProtocol] = aws.ToString(v)
+	}
+
+	tfMap["rule_action"] = apiObject.RuleAction
+
+	return tfMap
+}
+
+func flattenNetworkFirewallPolicy(apiObject *awstypes.NetworkFirewallPolicy) []interface{} {
+	if apiObject == nil {
+		return nil
+	}
+
+	tfMap := map[string]interface{}{}
+
+	tfMap["firewall_deployment_model"] = apiObject.FirewallDeploymentModel
+
+	return []interface{}{tfMap}
+}
+
+func flattenThirdPartyFirewallPolicy(apiObject *awstypes.ThirdPartyFirewallPolicy) []interface{} {
+	if apiObject == nil {
+		return nil
+	}
+
+	tfMap := map[string]interface{}{}
+
+	tfMap["firewall_deployment_model"] = apiObject.FirewallDeploymentModel
+
+	return []interface{}{tfMap}
+}
+
+func flattenResourceTags(apiObjects []awstypes.ResourceTag) map[string]interface{} {
+	tfMap := map[string]interface{}{}
+
+	for _, v := range apiObjects {
+		tfMap[aws.ToString(v.Key)] = aws.ToString(v.Value)
+	}
+
+	return tfMap
 }
