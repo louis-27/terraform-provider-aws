@@ -1,3 +1,6 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
 package names
 
 import (
@@ -6,7 +9,55 @@ import (
 	"io/fs"
 	"os"
 	"testing"
+
+	"github.com/hashicorp/aws-sdk-go-base/v2/endpoints"
 )
+
+func TestPartitionForRegion(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "empty",
+			input:    "",
+			expected: "",
+		},
+		{
+			name:     "China",
+			input:    endpoints.CnNorth1RegionID,
+			expected: endpoints.AwsCnPartitionID,
+		},
+		{
+			name:     "GovCloud",
+			input:    endpoints.UsGovWest1RegionID,
+			expected: endpoints.AwsUsGovPartitionID,
+		},
+		{
+			name:     "standard",
+			input:    endpoints.UsWest2RegionID,
+			expected: endpoints.AwsPartitionID,
+		},
+		{
+			name:     "default",
+			input:    "custom",
+			expected: endpoints.AwsPartitionID,
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got, want := PartitionForRegion(testCase.input).ID(), testCase.expected; got != want {
+				t.Errorf("got: %s, expected: %s", got, want)
+			}
+		})
+	}
+}
 
 func TestProviderPackageForAlias(t *testing.T) {
 	t.Parallel()
@@ -38,7 +89,6 @@ func TestProviderPackageForAlias(t *testing.T) {
 	}
 
 	for _, testCase := range testCases {
-		testCase := testCase
 		t.Run(testCase.TestName, func(t *testing.T) {
 			t.Parallel()
 
@@ -68,30 +118,22 @@ func TestServicesForDirectories(t *testing.T) {
 		"amplifyuibuilder",
 		"apigatewaymanagementapi",
 		"appconfigdata",
-		"appflow",
-		"appintegrations",
 		"applicationcostprofiler",
 		"applicationdiscovery",
 		"applicationinsights",
 		"appregistry",
-		"auditmanager",
 		"augmentedairuntime",
 		"backupgateway",
 		"billingconductor",
 		"braket",
-		"ce",
 		"chimesdkidentity",
 		"chimesdkmeetings",
 		"chimesdkmessaging",
 		"clouddirectory",
 		"cloudsearchdomain",
-		"cloudwatchevidently",
-		"cloudwatchrum",
 		"codeguruprofiler",
-		"codegurureviewer",
 		"codestar",
 		"cognitosync",
-		"comprehend",
 		"comprehendmedical",
 		"computeoptimizer",
 		"connectcontactlens",
@@ -118,9 +160,7 @@ func TestServicesForDirectories(t *testing.T) {
 		"greengrassv2",
 		"groundstation",
 		"health",
-		"healthlake",
 		"honeycode",
-		"inspector2",
 		"iot1clickdevices",
 		"iot1clickprojects",
 		"iotdata",
@@ -135,7 +175,6 @@ func TestServicesForDirectories(t *testing.T) {
 		"iotthingsgraph",
 		"iottwinmaker",
 		"iotwireless",
-		"kendra",
 		"kinesisvideoarchivedmedia",
 		"kinesisvideomedia",
 		"kinesisvideosignaling",
@@ -143,12 +182,12 @@ func TestServicesForDirectories(t *testing.T) {
 		"lexmodelsv2",
 		"lexruntime",
 		"lexruntimev2",
-		"location",
 		"lookoutequipment",
 		"lookoutforvision",
 		"lookoutmetrics",
 		"lookoutvision",
 		"machinelearning",
+		"macie",
 		"managedblockchain",
 		"marketplacecatalog",
 		"marketplacecommerceanalytics",
@@ -179,14 +218,11 @@ func TestServicesForDirectories(t *testing.T) {
 		"polly",
 		"proton",
 		"qldbsession",
-		"rbin",
 		"rdsdata",
-		"redshiftdata",
 		"rekognition",
 		"resiliencehub",
 		"robomaker",
 		"route53recoverycluster",
-		"rum",
 		"sagemakera2iruntime",
 		"sagemakeredge",
 		"sagemakeredgemanager",
@@ -194,18 +230,14 @@ func TestServicesForDirectories(t *testing.T) {
 		"sagemakerruntime",
 		"savingsplans",
 		"servicecatalogappregistry",
-		"sesv2",
 		"sms",
 		"snowball",
 		"snowdevicemanagement",
-		"ssmcontacts",
-		"ssmincidents",
 		"sso",
 		"ssooidc",
 		"support",
 		"textract",
 		"timestreamquery",
-		"transcribe",
 		"transcribestreaming",
 		"translate",
 		"voiceid",
@@ -218,7 +250,6 @@ func TestServicesForDirectories(t *testing.T) {
 	}
 
 	for _, testCase := range ProviderPackages() {
-		testCase := testCase
 		t.Run(testCase, func(t *testing.T) {
 			t.Parallel()
 
@@ -276,7 +307,6 @@ func TestProviderNameUpper(t *testing.T) {
 	}
 
 	for _, testCase := range testCases {
-		testCase := testCase
 		t.Run(testCase.TestName, func(t *testing.T) {
 			t.Parallel()
 
@@ -331,12 +361,6 @@ func TestFullHumanFriendly(t *testing.T) {
 			Error:    false,
 		},
 		{
-			TestName: DRS,
-			Input:    DRS,
-			Expected: "AWS DRS (Elastic Disaster Recovery)",
-			Error:    false,
-		},
-		{
 			TestName: "doesnotexist",
 			Input:    "doesnotexist",
 			Expected: "",
@@ -345,143 +369,10 @@ func TestFullHumanFriendly(t *testing.T) {
 	}
 
 	for _, testCase := range testCases {
-		testCase := testCase
 		t.Run(testCase.TestName, func(t *testing.T) {
 			t.Parallel()
 
 			got, err := FullHumanFriendly(testCase.Input)
-
-			if err != nil && !testCase.Error {
-				t.Errorf("got error (%s), expected no error", err)
-			}
-
-			if err == nil && testCase.Error {
-				t.Errorf("got (%s) and no error, expected error", got)
-			}
-
-			if got != testCase.Expected {
-				t.Errorf("got %s, expected %s", got, testCase.Expected)
-			}
-		})
-	}
-}
-
-func TestAWSGoV1Package(t *testing.T) {
-	t.Parallel()
-
-	testCases := []struct {
-		TestName string
-		Input    string
-		Expected string
-		Error    bool
-	}{
-		{
-			TestName: "empty",
-			Input:    "",
-			Expected: "",
-			Error:    true,
-		},
-		{
-			TestName: "same as AWS",
-			Input:    Translate,
-			Expected: Translate,
-			Error:    false,
-		},
-		{
-			TestName: "different from AWS",
-			Input:    Transcribe,
-			Expected: "transcribeservice",
-			Error:    false,
-		},
-		{
-			TestName: "different from AWS 2",
-			Input:    RBin,
-			Expected: "recyclebin",
-			Error:    false,
-		},
-		{
-			TestName: "doesnotexist",
-			Input:    "doesnotexist",
-			Expected: "",
-			Error:    true,
-		},
-	}
-
-	for _, testCase := range testCases {
-		testCase := testCase
-		t.Run(testCase.TestName, func(t *testing.T) {
-			t.Parallel()
-
-			got, err := AWSGoV1Package(testCase.Input)
-
-			if err != nil && !testCase.Error {
-				t.Errorf("got error (%s), expected no error", err)
-			}
-
-			if err == nil && testCase.Error {
-				t.Errorf("got (%s) and no error, expected error", got)
-			}
-
-			if got != testCase.Expected {
-				t.Errorf("got %s, expected %s", got, testCase.Expected)
-			}
-		})
-	}
-}
-
-func TestAWSGoV1ClientName(t *testing.T) {
-	t.Parallel()
-
-	testCases := []struct {
-		TestName string
-		Input    string
-		Expected string
-		Error    bool
-	}{
-		{
-			TestName: "empty",
-			Input:    "",
-			Expected: "",
-			Error:    true,
-		},
-		{
-			TestName: Elasticsearch,
-			Input:    Elasticsearch,
-			Expected: "ElasticsearchService",
-			Error:    false,
-		},
-		{
-			TestName: Deploy,
-			Input:    Deploy,
-			Expected: "CodeDeploy",
-			Error:    false,
-		},
-		{
-			TestName: RUM,
-			Input:    RUM,
-			Expected: "CloudWatchRUM",
-			Error:    false,
-		},
-		{
-			TestName: CloudControl,
-			Input:    CloudControl,
-			Expected: "CloudControlApi",
-			Error:    false,
-		},
-		{
-			TestName: "doesnotexist",
-			Input:    "doesnotexist",
-			Expected: "",
-			Error:    true,
-		},
-	}
-
-	for _, testCase := range testCases {
-		testCase := testCase
-		t.Run(testCase.TestName, func(t *testing.T) {
-			t.Parallel()
-
-			got, err := AWSGoV1ClientTypeName(testCase.Input)
 
 			if err != nil && !testCase.Error {
 				t.Errorf("got error (%s), expected no error", err)

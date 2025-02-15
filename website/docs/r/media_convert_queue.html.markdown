@@ -20,9 +20,10 @@ resource "aws_media_convert_queue" "test" {
 
 ## Argument Reference
 
-The following arguments are supported:
+This resource supports the following arguments:
 
 * `name` - (Required) A unique identifier describing the queue
+* `concurrent_jobs` - (Optional) The maximum number of jobs your queue can process concurrently. For on-demand queues, the value you enter is constrained by your service quotas for Maximum concurrent jobs, per on-demand queue and Maximum concurrent jobs, per account. For reserved queues, specify the number of jobs you can process concurrently in your reservation plan instead.
 * `description` - (Optional) A description of the queue
 * `pricing_plan` - (Optional) Specifies whether the pricing plan for the queue is on-demand or reserved. Valid values are `ON_DEMAND` or `RESERVED`. Default to `ON_DEMAND`.
 * `reservation_plan_settings` - (Optional) A detail pricing plan of the  reserved queue. See below.
@@ -37,9 +38,9 @@ The following arguments are supported:
 * `renewal_type` - (Required) Specifies whether the term of your reserved queue pricing plan. Valid values are `AUTO_RENEW` or `EXPIRE`.
 * `reserved_slots` - (Required) Specifies the number of reserved transcode slots (RTS) for queue.
 
-## Attributes Reference
+## Attribute Reference
 
-In addition to all arguments above, the following attributes are exported:
+This resource exports the following attributes in addition to the arguments above:
 
 * `id` - The same as `name`
 * `arn` - The Arn of the queue
@@ -47,8 +48,17 @@ In addition to all arguments above, the following attributes are exported:
 
 ## Import
 
-Media Convert Queue can be imported via the queue name, e.g.,
+In Terraform v1.5.0 and later, use an [`import` block](https://developer.hashicorp.com/terraform/language/import) to import Media Convert Queue using the queue name. For example:
 
+```terraform
+import {
+  to = aws_media_convert_queue.test
+  id = "tf-test-queue"
+}
 ```
-$ terraform import aws_media_convert_queue.test tf-test-queue
+
+Using `terraform import`, import Media Convert Queue using the queue name. For example:
+
+```console
+% terraform import aws_media_convert_queue.test tf-test-queue
 ```

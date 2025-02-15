@@ -1,13 +1,27 @@
 plugin "aws" {
   enabled = true
-  version = "0.17.1"
+  version = "0.37.0"
   source  = "github.com/terraform-linters/tflint-ruleset-aws"
 }
 
-rule "aws_acm_certificate_lifecycle" {
+# Terraform Rules
+# https://github.com/terraform-linters/tflint-ruleset-terraform/blob/main/docs/rules/README.md
+
+rule "terraform_comment_syntax" {
+  enabled = true
+}
+
+rule "terraform_required_providers" {
   enabled = false
 }
 
-rule "aws_route_not_specified_target" {
+rule "terraform_required_version" {
+  enabled = false
+}
+
+# AWS Rules
+# https://github.com/terraform-linters/tflint-ruleset-aws/blob/master/docs/rules/README.md
+
+rule "aws_acm_certificate_lifecycle" {
   enabled = false
 }
